@@ -56,7 +56,16 @@ function issueAuthToken(\PDO $pdo, string $userId): string
     return $plainToken;
 }
 
-if ($method === 'GET' && $path === '/health') {
+function routeMatches(string $path, string $route): bool
+{
+    if ($path === $route) {
+        return true;
+    }
+
+    return str_ends_with($path, $route);
+}
+
+if ($method === 'GET' && routeMatches($path, '/health')) {
     Response::json(['status' => 'ok', 'service' => 'oga-tailor-api']);
     return;
 }
@@ -68,7 +77,7 @@ try {
     return;
 }
 
-if ($method === 'POST' && $path === '/api/auth/guest-start') {
+if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
     $data = requestBody();
     $deviceId = trim((string)($data['device_id'] ?? ''));
     $deviceName = trim((string)($data['device_name'] ?? ''));
@@ -116,7 +125,7 @@ if ($method === 'POST' && $path === '/api/auth/guest-start') {
     return;
 }
 
-if ($method === 'POST' && $path === '/api/auth/register') {
+if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
     $data = requestBody();
     $fullName = trim((string)($data['full_name'] ?? ''));
     $email = strtolower(trim((string)($data['email'] ?? '')));
@@ -203,7 +212,7 @@ if ($method === 'POST' && $path === '/api/auth/register') {
     return;
 }
 
-if ($method === 'POST' && $path === '/api/auth/login') {
+if ($method === 'POST' && routeMatches($path, '/api/auth/login')) {
     $data = requestBody();
     $email = strtolower(trim((string)($data['email'] ?? '')));
     $password = (string)($data['password'] ?? '');
@@ -233,7 +242,7 @@ if ($method === 'POST' && $path === '/api/auth/login') {
     return;
 }
 
-if ($method === 'POST' && $path === '/api/customers') {
+if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = Uuid::v4();
     $ownerId = $data['owner_user_id'] ?? null;
@@ -280,7 +289,7 @@ if ($method === 'POST' && $path === '/api/customers') {
     return;
 }
 
-if ($method === 'GET' && $path === '/api/customers') {
+if ($method === 'GET' && routeMatches($path, '/api/customers')) {
     $ownerId = $_GET['owner_user_id'] ?? null;
     if (!$ownerId) {
         Response::json(['error' => 'owner_user_id is required'], 422);
@@ -298,7 +307,7 @@ if ($method === 'GET' && $path === '/api/customers') {
     return;
 }
 
-if ($method === 'POST' && $path === '/api/measurements') {
+if ($method === 'POST' && routeMatches($path, '/api/measurements')) {
     $data = requestBody();
     $measurementId = Uuid::v4();
     $customerId = $data['customer_id'] ?? null;
@@ -325,7 +334,7 @@ if ($method === 'POST' && $path === '/api/measurements') {
     return;
 }
 
-if ($method === 'GET' && $path === '/api/measurements') {
+if ($method === 'GET' && routeMatches($path, '/api/measurements')) {
     $customerId = $_GET['customer_id'] ?? null;
     if (!$customerId) {
         Response::json(['error' => 'customer_id is required'], 422);
@@ -351,7 +360,7 @@ if ($method === 'GET' && $path === '/api/measurements') {
     return;
 }
 
-if ($method === 'POST' && $path === '/api/sync/push') {
+if ($method === 'POST' && routeMatches($path, '/api/sync/push')) {
     // Placeholder for mobile offline queue upload.
     Response::json([
         'message' => 'Sync push accepted',
@@ -360,7 +369,7 @@ if ($method === 'POST' && $path === '/api/sync/push') {
     return;
 }
 
-if ($method === 'GET' && $path === '/api/sync/pull') {
+if ($method === 'GET' && routeMatches($path, '/api/sync/pull')) {
     // Placeholder for incremental changes download.
     Response::json([
         'message' => 'Sync pull accepted',
@@ -369,4 +378,11 @@ if ($method === 'GET' && $path === '/api/sync/pull') {
     return;
 }
 
+error_log(sprintf(
+    'Route not found. method=%s path=%s uri=%s script_name=%s',
+    $method,
+    $path,
+    $_SERVER['REQUEST_URI'] ?? '',
+    $_SERVER['SCRIPT_NAME'] ?? ''
+));
 Response::json(['error' => 'Not Found'], 404);
