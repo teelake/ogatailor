@@ -4,6 +4,7 @@ import '../../../core/network/api_client.dart';
 import '../../auth/application/auth_controller.dart';
 import '../data/customers_repository.dart';
 import '../domain/customer.dart';
+import '../domain/measurement_entry.dart';
 
 final customersRepositoryProvider = Provider<CustomersRepository>((ref) {
   return CustomersRepository(ref.watch(dioProvider));
@@ -15,4 +16,9 @@ final customersProvider = FutureProvider<List<Customer>>((ref) async {
     return [];
   }
   return ref.watch(customersRepositoryProvider).listCustomers(ownerUserId: session.userId);
+});
+
+final customerMeasurementsProvider =
+    FutureProvider.family<List<MeasurementEntry>, String>((ref, customerId) async {
+  return ref.watch(customersRepositoryProvider).listMeasurements(customerId: customerId);
 });

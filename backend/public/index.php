@@ -62,11 +62,25 @@ function routeMatches(string $path, string $route): bool
         return true;
     }
 
-    return str_ends_with($path, $route);
+    if (str_ends_with($path, $route)) {
+        return true;
+    }
+
+    return str_contains($path, $route);
 }
 
-if ($method === 'GET' && routeMatches($path, '/health')) {
+if ($method === 'GET' && ($path === '/' || routeMatches($path, '/health'))) {
     Response::json(['status' => 'ok', 'service' => 'oga-tailor-api']);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/debug/request')) {
+    Response::json([
+        'path' => $path,
+        'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+        'script_name' => $_SERVER['SCRIPT_NAME'] ?? '',
+        'php_self' => $_SERVER['PHP_SELF'] ?? '',
+    ]);
     return;
 }
 
@@ -248,6 +262,7 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     $ownerId = $data['owner_user_id'] ?? null;
     $fullName = trim((string)($data['full_name'] ?? ''));
     $phone = trim((string)($data['phone_number'] ?? ''));
+    $notes = trim((string)($data['notes'] ?? ''));
 
     if (!$ownerId || $fullName === '') {
         Response::json(['error' => 'owner_user_id and full_name are required'], 422);
@@ -275,14 +290,15 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO customers (id, owner_user_id, full_name, phone_number, created_at, updated_at, last_modified_at)
-         VALUES (:id, :owner_user_id, :full_name, :phone_number, NOW(), NOW(), NOW())'
+        'INSERT INTO customers (id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at)
+         VALUES (:id, :owner_user_id, :full_name, :phone_number, :notes, NOW(), NOW(), NOW())'
     );
     $stmt->execute([
         ':id' => $customerId,
         ':owner_user_id' => $ownerId,
         ':full_name' => $fullName,
         ':phone_number' => $phone !== '' ? $phone : null,
+        ':notes' => $notes !== '' ? $notes : null,
     ]);
 
     Response::json(['id' => $customerId], 201);
@@ -297,14 +313,143 @@ if ($method === 'GET' && routeMatches($path, '/api/customers')) {
     }
 
     $stmt = $pdo->prepare(
-        'SELECT id, owner_user_id, full_name, phone_number, created_at, updated_at, last_modified_at
+        'SELECT id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at
          FROM customers
          WHERE owner_user_id = :owner_user_id
+         AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')
          ORDER BY full_name ASC'
     );
     $stmt->execute([':owner_user_id' => $ownerId]);
     Response::json(['data' => $stmt->fetchAll()]);
     return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
+    $data = requestBody();
+    $customerId = trim((string)($data['customer_id'] ?? ''));
+    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $fullName = trim((string)($data['full_name'] ?? ''));
+    $phone = trim((string)($data['phone_number'] ?? ''));
+    $notes = trim((string)($data['notes'] ?? ''));
+
+    if ($customerId === '' || $ownerId === '' || $fullName === '') {
+        Response::json(['error' => 'customer_id, owner_user_id and full_name are required'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE customers
+         SET full_name = :full_name,
+             phone_number = :phone_number,
+             notes = :notes,
+             updated_at = NOW(),
+             last_modified_at = NOW()
+         WHERE id = :id AND owner_user_id = :owner_user_id'
+    );
+    $stmt->execute([
+        ':id' => $customerId,
+        ':owner_user_id' => $ownerId,
+        ':full_name' => $fullName,
+        ':phone_number' => $phone !== '' ? $phone : null,
+        ':notes' => $notes !== '' ? $notes : null,
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        Response::json(['error' => 'customer not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => 'Customer updated']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/customers/archive')) {
+    $data = requestBody();
+    $customerId = trim((string)($data['customer_id'] ?? ''));
+    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $archived = (bool)($data['archived'] ?? true);
+
+    if ($customerId === '' || $ownerId === '') {
+        Response::json(['error' => 'customer_id and owner_user_id are required'], 422);
+        return;
+    }
+
+    if ($archived) {
+        $stmt = $pdo->prepare(
+            'UPDATE customers
+             SET notes = CASE
+                    WHEN notes IS NULL OR notes = \'\' THEN \'[ARCHIVED]\'
+                    WHEN notes LIKE \'[ARCHIVED]%\' THEN notes
+                    ELSE CONCAT(\'[ARCHIVED] \', notes)
+                 END,
+                 updated_at = NOW(),
+                 last_modified_at = NOW()
+             WHERE id = :id AND owner_user_id = :owner_user_id'
+        );
+    } else {
+        $stmt = $pdo->prepare(
+            'UPDATE customers
+             SET notes = TRIM(REPLACE(COALESCE(notes, \'\'), \'[ARCHIVED]\', \'\')),
+                 updated_at = NOW(),
+                 last_modified_at = NOW()
+             WHERE id = :id AND owner_user_id = :owner_user_id'
+        );
+    }
+
+    $stmt->execute([
+        ':id' => $customerId,
+        ':owner_user_id' => $ownerId,
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        Response::json(['error' => 'customer not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => $archived ? 'Customer archived' : 'Customer unarchived']);
+    return;
+}
+
+if ($method === 'DELETE' && routeMatches($path, '/api/customers')) {
+    $data = requestBody();
+    $customerId = trim((string)($data['customer_id'] ?? ''));
+    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+
+    if ($customerId === '' || $ownerId === '') {
+        Response::json(['error' => 'customer_id and owner_user_id are required'], 422);
+        return;
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $deleteMeasurementsStmt = $pdo->prepare('DELETE FROM measurements WHERE customer_id = :customer_id');
+        $deleteMeasurementsStmt->execute([':customer_id' => $customerId]);
+
+        $deleteCustomerStmt = $pdo->prepare(
+            'DELETE FROM customers WHERE id = :id AND owner_user_id = :owner_user_id'
+        );
+        $deleteCustomerStmt->execute([
+            ':id' => $customerId,
+            ':owner_user_id' => $ownerId,
+        ]);
+
+        if ($deleteCustomerStmt->rowCount() < 1) {
+            $pdo->rollBack();
+            Response::json(['error' => 'customer not found'], 404);
+            return;
+        }
+
+        $pdo->commit();
+        Response::json(['message' => 'Customer deleted']);
+        return;
+    } catch (\Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        Response::json(['error' => 'Delete failed: ' . $exception->getMessage()], 500);
+        return;
+    }
 }
 
 if ($method === 'POST' && routeMatches($path, '/api/measurements')) {
@@ -357,6 +502,40 @@ if ($method === 'GET' && routeMatches($path, '/api/measurements')) {
     }, $rows);
 
     Response::json(['data' => $data]);
+    return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/measurements')) {
+    $data = requestBody();
+    $measurementId = trim((string)($data['measurement_id'] ?? ''));
+    $takenAt = trim((string)($data['taken_at'] ?? ''));
+    $payload = $data['payload'] ?? null;
+
+    if ($measurementId === '' || $takenAt === '' || !is_array($payload)) {
+        Response::json(['error' => 'measurement_id, taken_at and payload are required'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE measurements
+         SET taken_at = :taken_at,
+             payload_json = :payload_json,
+             updated_at = NOW(),
+             last_modified_at = NOW()
+         WHERE id = :id'
+    );
+    $stmt->execute([
+        ':id' => $measurementId,
+        ':taken_at' => $takenAt,
+        ':payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES),
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        Response::json(['error' => 'measurement not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => 'Measurement updated']);
     return;
 }
 

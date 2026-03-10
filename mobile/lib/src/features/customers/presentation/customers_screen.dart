@@ -4,13 +4,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/application/auth_controller.dart';
 import '../application/customers_controller.dart';
+import '../domain/customer.dart';
+import 'add_customer_screen.dart';
+import 'customer_details_screen.dart';
 import 'widgets/customer_tile.dart';
 
-class CustomersScreen extends ConsumerWidget {
+class CustomersScreen extends ConsumerStatefulWidget {
   const CustomersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CustomersScreen> createState() => _CustomersScreenState();
+}
+
+class _CustomersScreenState extends ConsumerState<CustomersScreen> {
+  final _queryController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _queryController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final customersAsync = ref.watch(customersProvider);
 
     return Scaffold(
@@ -32,7 +49,12 @@ class CustomersScreen extends ConsumerWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {},
+        onPressed: () async {
+          await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (_) => const AddCustomerScreen()),
+          );
+          ref.invalidate(customersProvider);
+        },
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.person_add_alt_1_rounded),
@@ -43,6 +65,8 @@ class CustomersScreen extends ConsumerWidget {
         child: Column(
           children: [
             TextField(
+              controller: _queryController,
+              onChanged: (value) => setState(() => _query = value.trim()),
               decoration: InputDecoration(
                 hintText: 'Search by name or phone',
                 prefixIcon: const Icon(Icons.search_rounded),
@@ -60,11 +84,22 @@ class CustomersScreen extends ConsumerWidget {
                     return const _EmptyState();
                   }
 
+                  final filtered = _filterCustomers(customers, _query);
                   return ListView.separated(
-                    itemCount: customers.length,
+                    itemCount: filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      return CustomerTile(customer: customers[index]);
+                      final customer = filtered[index];
+                      return CustomerTile(
+                        customer: customer,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CustomerDetailsScreen(customer: customer),
+                            ),
+                          );
+                        },
+                      );
                     },
                   );
                 },
@@ -78,6 +113,20 @@ class CustomersScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  List<Customer> _filterCustomers(List<Customer> customers, String query) {
+    if (query.isEmpty) {
+      return customers;
+    }
+    final q = query.toLowerCase();
+    return customers
+        .where(
+          (customer) =>
+              customer.fullName.toLowerCase().contains(q) ||
+              (customer.phoneNumber ?? '').toLowerCase().contains(q),
+        )
+        .toList();
   }
 }
 

@@ -33,6 +33,22 @@ Base URL: `https://your-domain.com/api`
     - `full_name` (string)
     - `phone_number` (string, optional)
 - `GET /api/customers?owner_user_id={uuid}`
+- `PATCH /api/customers`
+  - body:
+    - `customer_id`
+    - `owner_user_id`
+    - `full_name`
+    - `phone_number` (optional)
+    - `notes` (optional)
+- `POST /api/customers/archive`
+  - body:
+    - `customer_id`
+    - `owner_user_id`
+    - `archived` (boolean)
+- `DELETE /api/customers`
+  - body:
+    - `customer_id`
+    - `owner_user_id`
 
 ## Measurements
 
@@ -42,6 +58,11 @@ Base URL: `https://your-domain.com/api`
     - `taken_at` (ISO datetime)
     - `payload` (object JSON)
 - `GET /api/measurements?customer_id={uuid}`
+- `PATCH /api/measurements`
+  - body:
+    - `measurement_id`
+    - `taken_at`
+    - `payload` (object)
 
 ## Sync (Draft)
 
