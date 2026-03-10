@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/sync/offline_sync_service.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../orders/presentation/orders_screen.dart';
 import '../../plan/application/plan_controller.dart';
@@ -34,6 +35,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   Widget build(BuildContext context) {
     final customersAsync = ref.watch(customersProvider);
     final planSummaryAsync = ref.watch(planSummaryProvider);
+    final syncStatusAsync = ref.watch(syncStatusProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -85,6 +87,8 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         child: Column(
           children: [
             _PlanUsageBanner(summaryAsync: planSummaryAsync),
+            const SizedBox(height: 10),
+            _SyncStatusBanner(syncStatusAsync: syncStatusAsync),
             const SizedBox(height: 10),
             TextField(
               controller: _queryController,
@@ -213,6 +217,60 @@ class _PlanUsageBanner extends StatelessWidget {
                 LinearProgressIndicator(value: ratio),
                 const SizedBox(height: 8),
                 const Text('Upgrade for unlimited customers and cloud backup.'),
+              ],
+            ),
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _SyncStatusBanner extends ConsumerWidget {
+  const _SyncStatusBanner({
+    required this.syncStatusAsync,
+  });
+
+  final AsyncValue<Map<String, dynamic>> syncStatusAsync;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return syncStatusAsync.when(
+      data: (status) {
+        final state = (status['state'] ?? 'synced') as String;
+        final pendingCount = (status['pending_count'] ?? 0) as int;
+        final lastError = status['last_error'] as String?;
+
+        if (state == 'synced' && pendingCount == 0) {
+          return const SizedBox.shrink();
+        }
+
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                const Icon(Icons.sync_rounded),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    state == 'failed'
+                        ? 'Sync failed ($pendingCount pending). ${lastError ?? ''}'
+                        : 'Sync pending: $pendingCount change(s)',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await ref.read(offlineSyncServiceProvider).processQueue();
+                    ref.invalidate(syncStatusProvider);
+                    ref.invalidate(customersProvider);
+                  },
+                  child: const Text('Retry'),
+                ),
               ],
             ),
           ),

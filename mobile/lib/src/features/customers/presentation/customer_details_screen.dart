@@ -40,7 +40,7 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
         title: const Text('Customer Details'),
         actions: [
           PopupMenuButton<String>(
-            onSelected: (value) => _onMenuAction(value, session?.userId),
+            onSelected: (value) => _onMenuAction(value, session != null),
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'edit', child: Text('Edit customer')),
               PopupMenuItem(value: 'archive', child: Text('Archive customer')),
@@ -147,8 +147,8 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
     ref.invalidate(customerMeasurementsProvider(_customer.id));
   }
 
-  Future<void> _onMenuAction(String action, String? ownerUserId) async {
-    if (ownerUserId == null) {
+  Future<void> _onMenuAction(String action, bool hasSession) async {
+    if (!hasSession) {
       return;
     }
 
@@ -172,7 +172,6 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
     if (action == 'archive') {
       await ref.read(customersRepositoryProvider).archiveCustomer(
             customerId: _customer.id,
-            ownerUserId: ownerUserId,
             archived: true,
           );
       ref.invalidate(customersProvider);
@@ -200,7 +199,6 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
 
       await ref.read(customersRepositoryProvider).deleteCustomer(
             customerId: _customer.id,
-            ownerUserId: ownerUserId,
           );
       ref.invalidate(customersProvider);
       if (!mounted) return;

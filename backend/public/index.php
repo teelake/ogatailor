@@ -8,6 +8,10 @@ use App\Support\Uuid;
 
 require_once dirname(__DIR__) . '/bootstrap.php';
 
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
@@ -27,6 +31,11 @@ if (str_starts_with($uri, '/index.php/')) {
 }
 
 $path = rtrim($uri, '/') ?: '/';
+
+if ($method === 'OPTIONS') {
+    http_response_code(204);
+    return;
+}
 
 function requestBody(): array
 {
@@ -54,6 +63,79 @@ function issueAuthToken(\PDO $pdo, string $userId): string
     ]);
 
     return $plainToken;
+}
+
+function validateRequired(array $data, array $required): ?string
+{
+    foreach ($required as $field) {
+        $value = $data[$field] ?? null;
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return $field;
+        }
+    }
+    return null;
+}
+
+function bearerToken(): ?string
+{
+    $raw = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if ($raw === '' || !str_starts_with($raw, 'Bearer ')) {
+        return null;
+    }
+    return trim(substr($raw, 7));
+}
+
+function authenticatedUser(\PDO $pdo): ?array
+{
+    $token = bearerToken();
+    if ($token === null || $token === '') {
+        return null;
+    }
+
+    $tokenHash = hash('sha256', $token);
+    $stmt = $pdo->prepare(
+        'SELECT u.id, u.plan_code, u.is_guest
+         FROM auth_tokens t
+         INNER JOIN users u ON u.id = t.user_id
+         WHERE t.token_hash = :token_hash
+         LIMIT 1'
+    );
+    $stmt->execute([':token_hash' => $tokenHash]);
+    $user = $stmt->fetch();
+    return $user ?: null;
+}
+
+function requirePaid(array $authUser): bool
+{
+    return ($authUser['plan_code'] ?? 'free') === 'paid';
+}
+
+function enforceRateLimit(string $key, int $maxHits, int $windowSeconds): bool
+{
+    $rateDir = dirname(__DIR__) . '/storage/logs';
+    if (!is_dir($rateDir)) {
+        @mkdir($rateDir, 0775, true);
+    }
+    $file = $rateDir . '/rate-limit.json';
+    $now = time();
+    $data = [];
+    if (is_file($file)) {
+        $raw = file_get_contents($file);
+        $decoded = $raw ? json_decode($raw, true) : null;
+        if (is_array($decoded)) {
+            $data = $decoded;
+        }
+    }
+
+    $entry = $data[$key] ?? ['count' => 0, 'window_start' => $now];
+    if (($now - (int)$entry['window_start']) >= $windowSeconds) {
+        $entry = ['count' => 0, 'window_start' => $now];
+    }
+    $entry['count'] = (int)$entry['count'] + 1;
+    $data[$key] = $entry;
+    file_put_contents($file, json_encode($data, JSON_UNESCAPED_SLASHES));
+
+    return $entry['count'] <= $maxHits;
 }
 
 function routeMatches(string $path, string $route): bool
@@ -89,6 +171,27 @@ try {
 } catch (RuntimeException $exception) {
     Response::json(['error' => $exception->getMessage()], 500);
     return;
+}
+
+$ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+if (!enforceRateLimit($ip . '|' . $path, 120, 60)) {
+    Response::json(['error' => 'Too many requests. Please retry shortly.'], 429);
+    return;
+}
+
+$isPublicRoute = ($method === 'GET' && ($path === '/' || routeMatches($path, '/health'))) ||
+    routeMatches($path, '/api/debug/request') ||
+    routeMatches($path, '/api/auth/guest-start') ||
+    routeMatches($path, '/api/auth/register') ||
+    routeMatches($path, '/api/auth/login');
+
+$authUser = null;
+if (routeMatches($path, '/api/') && !$isPublicRoute) {
+    $authUser = authenticatedUser($pdo);
+    if (!$authUser) {
+        Response::json(['error' => 'Unauthorized'], 401);
+        return;
+    }
 }
 
 if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
@@ -257,11 +360,7 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/login')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
-    $ownerId = trim((string)($_GET['owner_user_id'] ?? ''));
-    if ($ownerId === '') {
-        Response::json(['error' => 'owner_user_id is required'], 422);
-        return;
-    }
+    $ownerId = (string)($authUser['id'] ?? '');
 
     $planStmt = $pdo->prepare('SELECT plan_code, plan_expires_at FROM users WHERE id = :id LIMIT 1');
     $planStmt->execute([':id' => $ownerId]);
@@ -287,25 +386,17 @@ if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
 if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = Uuid::v4();
-    $ownerId = $data['owner_user_id'] ?? null;
+    $ownerId = (string)($authUser['id'] ?? '');
     $fullName = trim((string)($data['full_name'] ?? ''));
     $phone = trim((string)($data['phone_number'] ?? ''));
     $notes = trim((string)($data['notes'] ?? ''));
 
-    if (!$ownerId || $fullName === '') {
-        Response::json(['error' => 'owner_user_id and full_name are required'], 422);
+    if ($fullName === '') {
+        Response::json(['error' => 'full_name is required'], 422);
         return;
     }
 
-    $ownerStmt = $pdo->prepare('SELECT id, plan_code FROM users WHERE id = :id LIMIT 1');
-    $ownerStmt->execute([':id' => $ownerId]);
-    $owner = $ownerStmt->fetch();
-    if (!$owner) {
-        Response::json(['error' => 'owner user not found'], 404);
-        return;
-    }
-
-    if (($owner['plan_code'] ?? 'free') === 'free') {
+    if (($authUser['plan_code'] ?? 'free') === 'free') {
         $countStmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE owner_user_id = :owner_user_id');
         $countStmt->execute([':owner_user_id' => $ownerId]);
         $customerCount = (int)$countStmt->fetchColumn();
@@ -334,11 +425,7 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/customers')) {
-    $ownerId = $_GET['owner_user_id'] ?? null;
-    if (!$ownerId) {
-        Response::json(['error' => 'owner_user_id is required'], 422);
-        return;
-    }
+    $ownerId = (string)($authUser['id'] ?? '');
 
     $stmt = $pdo->prepare(
         'SELECT id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at
@@ -355,13 +442,13 @@ if ($method === 'GET' && routeMatches($path, '/api/customers')) {
 if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = trim((string)($data['customer_id'] ?? ''));
-    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
     $fullName = trim((string)($data['full_name'] ?? ''));
     $phone = trim((string)($data['phone_number'] ?? ''));
     $notes = trim((string)($data['notes'] ?? ''));
 
-    if ($customerId === '' || $ownerId === '' || $fullName === '') {
-        Response::json(['error' => 'customer_id, owner_user_id and full_name are required'], 422);
+    if ($customerId === '' || $fullName === '') {
+        Response::json(['error' => 'customer_id and full_name are required'], 422);
         return;
     }
 
@@ -394,11 +481,11 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
 if ($method === 'POST' && routeMatches($path, '/api/customers/archive')) {
     $data = requestBody();
     $customerId = trim((string)($data['customer_id'] ?? ''));
-    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
     $archived = (bool)($data['archived'] ?? true);
 
-    if ($customerId === '' || $ownerId === '') {
-        Response::json(['error' => 'customer_id and owner_user_id are required'], 422);
+    if ($customerId === '') {
+        Response::json(['error' => 'customer_id is required'], 422);
         return;
     }
 
@@ -441,10 +528,10 @@ if ($method === 'POST' && routeMatches($path, '/api/customers/archive')) {
 if ($method === 'DELETE' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = trim((string)($data['customer_id'] ?? ''));
-    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
 
-    if ($customerId === '' || $ownerId === '') {
-        Response::json(['error' => 'customer_id and owner_user_id are required'], 422);
+    if ($customerId === '') {
+        Response::json(['error' => 'customer_id is required'], 422);
         return;
     }
 
@@ -570,7 +657,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/measurements')) {
 if ($method === 'POST' && routeMatches($path, '/api/orders')) {
     $data = requestBody();
     $orderId = Uuid::v4();
-    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
     $customerId = trim((string)($data['customer_id'] ?? ''));
     $title = trim((string)($data['title'] ?? ''));
     $status = trim((string)($data['status'] ?? 'pending'));
@@ -578,8 +665,8 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
     $amountTotal = (float)($data['amount_total'] ?? 0);
     $notes = trim((string)($data['notes'] ?? ''));
 
-    if ($ownerId === '' || $customerId === '' || $title === '') {
-        Response::json(['error' => 'owner_user_id, customer_id and title are required'], 422);
+    if ($customerId === '' || $title === '') {
+        Response::json(['error' => 'customer_id and title are required'], 422);
         return;
     }
 
@@ -609,11 +696,7 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/orders')) {
-    $ownerId = trim((string)($_GET['owner_user_id'] ?? ''));
-    if ($ownerId === '') {
-        Response::json(['error' => 'owner_user_id is required'], 422);
-        return;
-    }
+    $ownerId = (string)($authUser['id'] ?? '');
 
     $stmt = $pdo->prepare(
         'SELECT o.id, o.owner_user_id, o.customer_id, c.full_name AS customer_name, o.title, o.status, o.due_date, o.amount_total, o.notes, o.created_at, o.updated_at
@@ -630,11 +713,11 @@ if ($method === 'GET' && routeMatches($path, '/api/orders')) {
 if ($method === 'PATCH' && routeMatches($path, '/api/orders/status')) {
     $data = requestBody();
     $orderId = trim((string)($data['order_id'] ?? ''));
-    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
     $status = trim((string)($data['status'] ?? ''));
 
-    if ($orderId === '' || $ownerId === '' || $status === '') {
-        Response::json(['error' => 'order_id, owner_user_id and status are required'], 422);
+    if ($orderId === '' || $status === '') {
+        Response::json(['error' => 'order_id and status are required'], 422);
         return;
     }
 
@@ -667,11 +750,11 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/status')) {
 if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
     $data = requestBody();
     $orderId = trim((string)($data['order_id'] ?? ''));
-    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
     $dueDate = trim((string)($data['due_date'] ?? ''));
 
-    if ($orderId === '' || $ownerId === '') {
-        Response::json(['error' => 'order_id and owner_user_id are required'], 422);
+    if ($orderId === '') {
+        Response::json(['error' => 'order_id is required'], 422);
         return;
     }
 
@@ -696,6 +779,10 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
 }
 
 if ($method === 'POST' && routeMatches($path, '/api/sync/push')) {
+    if (!requirePaid((array)$authUser)) {
+        Response::json(['error' => 'Cloud sync is available on paid plan only'], 403);
+        return;
+    }
     // Placeholder for mobile offline queue upload.
     Response::json([
         'message' => 'Sync push accepted',
@@ -705,10 +792,53 @@ if ($method === 'POST' && routeMatches($path, '/api/sync/push')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/sync/pull')) {
+    if (!requirePaid((array)$authUser)) {
+        Response::json(['error' => 'Cloud sync is available on paid plan only'], 403);
+        return;
+    }
     // Placeholder for incremental changes download.
     Response::json([
         'message' => 'Sync pull accepted',
         'next' => 'Return changed records since cursor timestamp',
+    ]);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/export/measurements')) {
+    if (!requirePaid((array)$authUser)) {
+        Response::json(['error' => 'Export is available on paid plan only'], 403);
+        return;
+    }
+
+    $ownerId = (string)($authUser['id'] ?? '');
+    $stmt = $pdo->prepare(
+        'SELECT c.full_name AS customer_name, m.taken_at, m.payload_json
+         FROM measurements m
+         INNER JOIN customers c ON c.id = m.customer_id
+         WHERE c.owner_user_id = :owner_user_id
+         ORDER BY m.taken_at DESC'
+    );
+    $stmt->execute([':owner_user_id' => $ownerId]);
+    $rows = $stmt->fetchAll();
+
+    Response::json(['data' => $rows]);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/diagnostics')) {
+    $dbOk = false;
+    try {
+        $pingStmt = $pdo->query('SELECT 1');
+        $dbOk = $pingStmt !== false;
+    } catch (\Throwable) {
+        $dbOk = false;
+    }
+
+    Response::json([
+        'service' => 'oga-tailor-api',
+        'db_ok' => $dbOk,
+        'auth_user_id' => $authUser['id'] ?? null,
+        'timestamp' => date('c'),
     ]);
     return;
 }

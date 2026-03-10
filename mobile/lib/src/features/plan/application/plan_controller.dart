@@ -9,5 +9,5 @@ final planSummaryProvider = FutureProvider<PlanSummary?>((ref) async {
   if (session == null) {
     return null;
   }
-  return ref.watch(planRepositoryProvider).fetchSummary(ownerUserId: session.userId);
+  return ref.watch(planRepositoryProvider).fetchSummary();
 });

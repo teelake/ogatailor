@@ -117,7 +117,6 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
     try {
       if (widget.customer == null) {
         await ref.read(customersRepositoryProvider).createCustomer(
-              ownerUserId: session.userId,
               fullName: _nameController.text.trim(),
               phoneNumber: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
               notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
@@ -125,7 +124,6 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
       } else {
         await ref.read(customersRepositoryProvider).updateCustomer(
               customerId: widget.customer!.id,
-              ownerUserId: session.userId,
               fullName: _nameController.text.trim(),
               phoneNumber: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
               notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),

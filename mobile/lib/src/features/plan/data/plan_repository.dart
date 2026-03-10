@@ -9,11 +9,8 @@ class PlanRepository {
 
   final Dio _dio;
 
-  Future<PlanSummary> fetchSummary({required String ownerUserId}) async {
-    final response = await _dio.get(
-      '/api/plan/summary',
-      queryParameters: {'owner_user_id': ownerUserId},
-    );
+  Future<PlanSummary> fetchSummary() async {
+    final response = await _dio.get('/api/plan/summary');
     final data = Map<String, dynamic>.from(response.data as Map);
     return PlanSummary(
       planCode: (data['plan_code'] ?? 'free') as String,

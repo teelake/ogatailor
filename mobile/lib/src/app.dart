@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/sync/offline_sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/application/auth_controller.dart';
 import 'features/auth/presentation/welcome_screen.dart';
@@ -20,9 +21,32 @@ class OgaTailorApp extends ConsumerWidget {
       home: authState.when(
         loading: () => const _BootScreen(),
         error: (_, __) => const WelcomeScreen(),
-        data: (session) => session == null ? const WelcomeScreen() : const CustomersScreen(),
+        data: (session) => session == null ? const WelcomeScreen() : const _AuthenticatedHome(),
       ),
     );
+  }
+}
+
+class _AuthenticatedHome extends ConsumerStatefulWidget {
+  const _AuthenticatedHome();
+
+  @override
+  ConsumerState<_AuthenticatedHome> createState() => _AuthenticatedHomeState();
+}
+
+class _AuthenticatedHomeState extends ConsumerState<_AuthenticatedHome> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() async {
+      await ref.read(offlineSyncServiceProvider).processQueue();
+      ref.invalidate(syncStatusProvider);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const CustomersScreen();
   }
 }
 

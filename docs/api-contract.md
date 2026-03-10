@@ -2,6 +2,14 @@
 
 Base URL: `https://your-domain.com/api`
 
+## Authentication
+
+- Protected endpoints require: `Authorization: Bearer <token>`
+- Obtain token from:
+  - `POST /api/auth/guest-start`
+  - `POST /api/auth/register`
+  - `POST /api/auth/login`
+
 ## Health
 
 - `GET /health`
@@ -89,7 +97,12 @@ Base URL: `https://your-domain.com/api`
 
 ## Plan Summary
 
-- `GET /api/plan/summary?owner_user_id={uuid}`
+- `GET /api/plan/summary`
+
+## Diagnostics and Export
+
+- `GET /api/diagnostics` (protected)
+- `GET /api/export/measurements` (paid only)
 
 ## Sync (Draft)
 
@@ -97,6 +110,7 @@ Base URL: `https://your-domain.com/api`
   - uploads pending offline changes from device queue
 - `GET /api/sync/pull?user_id={uuid}&since={cursor}`
   - pulls changed entities since cursor
+  - paid plan only
 
 ## Upcoming Endpoints (Phase 2+)
 

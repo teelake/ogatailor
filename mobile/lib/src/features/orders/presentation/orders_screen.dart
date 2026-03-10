@@ -34,7 +34,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                 await showModalBottomSheet<void>(
                   context: context,
                   isScrollControlled: true,
-                  builder: (_) => _CreateOrderSheet(ownerUserId: session.userId),
+                  builder: (_) => const _CreateOrderSheet(),
                 );
                 ref.invalidate(ordersProvider);
               },
@@ -155,7 +155,6 @@ class _OrderCard extends ConsumerWidget {
                     : (value) async {
                         if (value == null || value == order.status) return;
                         await ref.read(ordersRepositoryProvider).updateStatus(
-                              ownerUserId: session.userId,
                               orderId: order.id,
                               status: value,
                             );
@@ -171,9 +170,7 @@ class _OrderCard extends ConsumerWidget {
 }
 
 class _CreateOrderSheet extends ConsumerStatefulWidget {
-  const _CreateOrderSheet({required this.ownerUserId});
-
-  final String ownerUserId;
+  const _CreateOrderSheet();
 
   @override
   ConsumerState<_CreateOrderSheet> createState() => _CreateOrderSheetState();
@@ -279,7 +276,6 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                         setState(() => _saving = true);
                         try {
                           await ref.read(ordersRepositoryProvider).createOrder(
-                                ownerUserId: widget.ownerUserId,
                                 customerId: _selectedCustomerId!,
                                 title: _titleController.text.trim(),
                                 status: 'pending',
@@ -365,7 +361,6 @@ class _OrderDetailsScreen extends ConsumerWidget {
                   : (value) async {
                       if (value == null || value == order.status) return;
                       await ref.read(ordersRepositoryProvider).updateStatus(
-                            ownerUserId: session.userId,
                             orderId: order.id,
                             status: value,
                           );
@@ -389,7 +384,6 @@ class _OrderDetailsScreen extends ConsumerWidget {
                       );
                       if (picked == null) return;
                       await ref.read(ordersRepositoryProvider).updateDueDate(
-                            ownerUserId: session.userId,
                             orderId: order.id,
                             dueDate: picked,
                           );

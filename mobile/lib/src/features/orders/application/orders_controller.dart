@@ -9,5 +9,5 @@ final ordersProvider = FutureProvider<List<OrderEntry>>((ref) async {
   if (session == null) {
     return [];
   }
-  return ref.watch(ordersRepositoryProvider).listOrders(ownerUserId: session.userId);
+  return ref.watch(ordersRepositoryProvider).listOrders();
 });
