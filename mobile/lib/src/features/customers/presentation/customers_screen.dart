@@ -172,13 +172,13 @@ class _PlanBadge extends StatelessWidget {
         color: AppColors.accentGold.withOpacity(0.16),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.workspace_premium_rounded, size: 16, color: AppColors.accentGold),
-          SizedBox(width: 6),
+          const Icon(Icons.workspace_premium_rounded, size: 16, color: AppColors.accentGold),
+          const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               color: AppColors.textPrimary,
               fontWeight: FontWeight.w600,
             ),
