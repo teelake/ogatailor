@@ -10,6 +10,22 @@ require_once dirname(__DIR__) . '/bootstrap.php';
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+$configuredBasePath = trim((string) \App\Config\Env::get('APP_BASE_PATH', ''), '/');
+$basePath = $configuredBasePath !== '' ? '/' . $configuredBasePath : $scriptDir;
+
+if ($basePath !== '' && $basePath !== '.' && str_starts_with($uri, $basePath . '/')) {
+    $uri = substr($uri, strlen($basePath));
+} elseif ($basePath !== '' && $basePath !== '.' && $uri === $basePath) {
+    $uri = '/';
+}
+
+if (str_starts_with($uri, '/index.php/')) {
+    $uri = substr($uri, strlen('/index.php'));
+} elseif ($uri === '/index.php') {
+    $uri = '/';
+}
+
 $path = rtrim($uri, '/') ?: '/';
 
 function requestBody(): array

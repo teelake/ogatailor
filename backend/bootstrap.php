@@ -26,3 +26,15 @@ if (!is_file($envPath) && is_file(__DIR__ . '/.env.example')) {
 }
 
 Env::load($envPath);
+
+$appDebug = strtolower((string) Env::get('APP_DEBUG', 'false')) === 'true';
+$logDir = __DIR__ . '/storage/logs';
+if (!is_dir($logDir)) {
+    @mkdir($logDir, 0775, true);
+}
+$logFile = $logDir . '/php-error.log';
+
+ini_set('log_errors', '1');
+ini_set('error_log', $logFile);
+ini_set('display_errors', $appDebug ? '1' : '0');
+error_reporting(E_ALL);
