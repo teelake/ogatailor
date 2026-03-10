@@ -256,6 +256,34 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/login')) {
     return;
 }
 
+if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
+    $ownerId = trim((string)($_GET['owner_user_id'] ?? ''));
+    if ($ownerId === '') {
+        Response::json(['error' => 'owner_user_id is required'], 422);
+        return;
+    }
+
+    $planStmt = $pdo->prepare('SELECT plan_code, plan_expires_at FROM users WHERE id = :id LIMIT 1');
+    $planStmt->execute([':id' => $ownerId]);
+    $user = $planStmt->fetch();
+    if (!$user) {
+        Response::json(['error' => 'owner user not found'], 404);
+        return;
+    }
+
+    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE owner_user_id = :owner_user_id');
+    $countStmt->execute([':owner_user_id' => $ownerId]);
+    $customerCount = (int)$countStmt->fetchColumn();
+
+    Response::json([
+        'plan_code' => $user['plan_code'],
+        'plan_expires_at' => $user['plan_expires_at'],
+        'customer_count' => $customerCount,
+        'customer_limit' => ($user['plan_code'] ?? 'free') === 'free' ? 100 : null,
+    ]);
+    return;
+}
+
 if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = Uuid::v4();
@@ -536,6 +564,134 @@ if ($method === 'PATCH' && routeMatches($path, '/api/measurements')) {
     }
 
     Response::json(['message' => 'Measurement updated']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/orders')) {
+    $data = requestBody();
+    $orderId = Uuid::v4();
+    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $customerId = trim((string)($data['customer_id'] ?? ''));
+    $title = trim((string)($data['title'] ?? ''));
+    $status = trim((string)($data['status'] ?? 'pending'));
+    $dueDate = trim((string)($data['due_date'] ?? ''));
+    $amountTotal = (float)($data['amount_total'] ?? 0);
+    $notes = trim((string)($data['notes'] ?? ''));
+
+    if ($ownerId === '' || $customerId === '' || $title === '') {
+        Response::json(['error' => 'owner_user_id, customer_id and title are required'], 422);
+        return;
+    }
+
+    $allowedStatuses = ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
+    if (!in_array($status, $allowedStatuses, true)) {
+        Response::json(['error' => 'invalid order status'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO orders (id, owner_user_id, customer_id, title, status, due_date, amount_total, notes, created_at, updated_at, last_modified_at)
+         VALUES (:id, :owner_user_id, :customer_id, :title, :status, :due_date, :amount_total, :notes, NOW(), NOW(), NOW())'
+    );
+    $stmt->execute([
+        ':id' => $orderId,
+        ':owner_user_id' => $ownerId,
+        ':customer_id' => $customerId,
+        ':title' => $title,
+        ':status' => $status,
+        ':due_date' => $dueDate !== '' ? $dueDate : null,
+        ':amount_total' => $amountTotal,
+        ':notes' => $notes !== '' ? $notes : null,
+    ]);
+
+    Response::json(['id' => $orderId], 201);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/orders')) {
+    $ownerId = trim((string)($_GET['owner_user_id'] ?? ''));
+    if ($ownerId === '') {
+        Response::json(['error' => 'owner_user_id is required'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT o.id, o.owner_user_id, o.customer_id, c.full_name AS customer_name, o.title, o.status, o.due_date, o.amount_total, o.notes, o.created_at, o.updated_at
+         FROM orders o
+         INNER JOIN customers c ON c.id = o.customer_id
+         WHERE o.owner_user_id = :owner_user_id
+         ORDER BY o.created_at DESC'
+    );
+    $stmt->execute([':owner_user_id' => $ownerId]);
+    Response::json(['data' => $stmt->fetchAll()]);
+    return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/orders/status')) {
+    $data = requestBody();
+    $orderId = trim((string)($data['order_id'] ?? ''));
+    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $status = trim((string)($data['status'] ?? ''));
+
+    if ($orderId === '' || $ownerId === '' || $status === '') {
+        Response::json(['error' => 'order_id, owner_user_id and status are required'], 422);
+        return;
+    }
+
+    $allowedStatuses = ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
+    if (!in_array($status, $allowedStatuses, true)) {
+        Response::json(['error' => 'invalid order status'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE orders
+         SET status = :status, updated_at = NOW(), last_modified_at = NOW()
+         WHERE id = :id AND owner_user_id = :owner_user_id'
+    );
+    $stmt->execute([
+        ':id' => $orderId,
+        ':owner_user_id' => $ownerId,
+        ':status' => $status,
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        Response::json(['error' => 'order not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => 'Order status updated']);
+    return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
+    $data = requestBody();
+    $orderId = trim((string)($data['order_id'] ?? ''));
+    $ownerId = trim((string)($data['owner_user_id'] ?? ''));
+    $dueDate = trim((string)($data['due_date'] ?? ''));
+
+    if ($orderId === '' || $ownerId === '') {
+        Response::json(['error' => 'order_id and owner_user_id are required'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE orders
+         SET due_date = :due_date, updated_at = NOW(), last_modified_at = NOW()
+         WHERE id = :id AND owner_user_id = :owner_user_id'
+    );
+    $stmt->execute([
+        ':id' => $orderId,
+        ':owner_user_id' => $ownerId,
+        ':due_date' => $dueDate !== '' ? $dueDate : null,
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        Response::json(['error' => 'order not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => 'Order due date updated']);
     return;
 }
 

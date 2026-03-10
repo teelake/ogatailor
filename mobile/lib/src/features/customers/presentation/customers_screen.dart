@@ -3,6 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../orders/presentation/orders_screen.dart';
+import '../../plan/application/plan_controller.dart';
+import '../../plan/domain/plan_summary.dart';
+import '../../plan/presentation/upgrade_screen.dart';
 import '../application/customers_controller.dart';
 import '../domain/customer.dart';
 import 'add_customer_screen.dart';
@@ -29,19 +33,35 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   @override
   Widget build(BuildContext context) {
     final customersAsync = ref.watch(customersProvider);
+    final planSummaryAsync = ref.watch(planSummaryProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Customers'),
         actions: [
-          const _PlanBadge(),
+          _PlanBadge(summaryAsync: planSummaryAsync),
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OrdersScreen()),
+              );
+            },
+            icon: const Icon(Icons.assignment_rounded),
+            tooltip: 'Orders',
+          ),
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'logout') {
                 await ref.read(authControllerProvider.notifier).logout();
+              } else if (value == 'upgrade') {
+                if (!mounted) return;
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const UpgradeScreen()),
+                );
               }
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'upgrade', child: Text('Upgrade Plan')),
               PopupMenuItem(value: 'logout', child: Text('Log out')),
             ],
           ),
@@ -64,6 +84,8 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            _PlanUsageBanner(summaryAsync: planSummaryAsync),
+            const SizedBox(height: 10),
             TextField(
               controller: _queryController,
               onChanged: (value) => setState(() => _query = value.trim()),
@@ -131,10 +153,15 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
 }
 
 class _PlanBadge extends StatelessWidget {
-  const _PlanBadge();
+  const _PlanBadge({
+    required this.summaryAsync,
+  });
+
+  final AsyncValue<PlanSummary?> summaryAsync;
 
   @override
   Widget build(BuildContext context) {
+    final label = summaryAsync.valueOrNull?.isFree == false ? 'Paid Plan' : 'Free Plan';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -146,7 +173,7 @@ class _PlanBadge extends StatelessWidget {
           Icon(Icons.workspace_premium_rounded, size: 16, color: AppColors.accentGold),
           SizedBox(width: 6),
           Text(
-            'Free Plan',
+            label,
             style: TextStyle(
               color: AppColors.textPrimary,
               fontWeight: FontWeight.w600,
@@ -154,6 +181,45 @@ class _PlanBadge extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PlanUsageBanner extends StatelessWidget {
+  const _PlanUsageBanner({
+    required this.summaryAsync,
+  });
+
+  final AsyncValue<PlanSummary?> summaryAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    return summaryAsync.when(
+      data: (summary) {
+        if (summary == null || !summary.isFree || summary.customerLimit == null) {
+          return const SizedBox.shrink();
+        }
+        final limit = summary.customerLimit!;
+        final used = summary.customerCount;
+        final ratio = (used / limit).clamp(0, 1).toDouble();
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Free Plan Usage: $used / $limit customers'),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: ratio),
+                const SizedBox(height: 8),
+                const Text('Upgrade for unlimited customers and cloud backup.'),
+              ],
+            ),
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }

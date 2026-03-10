@@ -64,6 +64,33 @@ Base URL: `https://your-domain.com/api`
     - `taken_at`
     - `payload` (object)
 
+## Orders (Phase 2.2)
+
+- `POST /api/orders`
+  - body:
+    - `owner_user_id`
+    - `customer_id`
+    - `title`
+    - `status` (`pending|in_progress|ready|delivered|cancelled`)
+    - `amount_total`
+    - `due_date` (optional)
+    - `notes` (optional)
+- `GET /api/orders?owner_user_id={uuid}`
+- `PATCH /api/orders/status`
+  - body:
+    - `owner_user_id`
+    - `order_id`
+    - `status`
+- `PATCH /api/orders/due-date`
+  - body:
+    - `owner_user_id`
+    - `order_id`
+    - `due_date` (nullable)
+
+## Plan Summary
+
+- `GET /api/plan/summary?owner_user_id={uuid}`
+
 ## Sync (Draft)
 
 - `POST /api/sync/push`
