@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import '../../../core/utils/error_message.dart';
 import '../../auth/application/auth_controller.dart';
 import '../application/customers_controller.dart';
 import '../domain/customer.dart';
@@ -159,6 +160,7 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
               gender: _gender,
               phoneNumber: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
               notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+              lastKnownModifiedAt: widget.customer?.lastModifiedAt,
             );
       }
       ref.invalidate(customersProvider);
@@ -186,7 +188,14 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save customer: $error')),
+        SnackBar(
+          content: Text(
+            userFriendlyError(
+              error,
+              fallback: 'Could not save customer. Please check details and try again.',
+            ),
+          ),
+        ),
       );
     } finally {
       if (mounted) {

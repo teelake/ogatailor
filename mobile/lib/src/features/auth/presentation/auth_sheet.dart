@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/error_message.dart';
 import '../application/auth_controller.dart';
 import 'forgot_password_screen.dart';
 
@@ -24,15 +25,20 @@ class _AuthSheet extends ConsumerStatefulWidget {
 }
 
 class _AuthSheetState extends ConsumerState<_AuthSheet> {
+  final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
   @override
   void dispose() {
     _fullNameController.dispose();
+    _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -49,76 +55,133 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
         top: 16,
         bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            isRegister ? 'Create Account' : 'Sign In',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 12),
-          if (isRegister) ...[
-            TextField(
-              controller: _fullNameController,
-              decoration: const InputDecoration(labelText: 'Full name'),
-            ),
-            const SizedBox(height: 10),
-          ],
-          TextField(
-            controller: _emailController,
-            decoration: const InputDecoration(labelText: 'Email'),
-            keyboardType: TextInputType.emailAddress,
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _passwordController,
-            decoration: const InputDecoration(labelText: 'Password'),
-            obscureText: true,
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: loading
-                ? null
-                : () async {
-                    if (isRegister) {
-                      await ref.read(authControllerProvider.notifier).register(
-                            fullName: _fullNameController.text.trim(),
-                            email: _emailController.text.trim(),
-                            password: _passwordController.text,
-                          );
-                    } else {
-                      await ref.read(authControllerProvider.notifier).login(
-                            email: _emailController.text.trim(),
-                            password: _passwordController.text,
-                          );
-                    }
-                    if (context.mounted) {
-                      Navigator.of(context).pop();
-                    }
-                  },
-            child: Text(isRegister ? 'Create Account' : 'Sign In'),
-          ),
-          if (authState.hasError) ...[
-            const SizedBox(height: 10),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
             Text(
-              '${authState.error}',
-              style: const TextStyle(color: Colors.red),
+              isRegister ? 'Create Account' : 'Sign In',
+              style: Theme.of(context).textTheme.titleLarge,
             ),
-          ],
-          if (!isRegister) ...[
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
-                );
+            const SizedBox(height: 12),
+            if (isRegister) ...[
+              TextFormField(
+                controller: _fullNameController,
+                decoration: const InputDecoration(labelText: 'Full name'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Full name is required' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Phone number (optional)',
+                  hintText: 'e.g. 08012345678',
+                ),
+                keyboardType: TextInputType.phone,
+                maxLength: 11,
+                validator: (v) {
+                  final value = (v ?? '').trim();
+                  if (value.isEmpty) return null;
+                  if (!RegExp(r'^\d+$').hasMatch(value)) return 'Phone must be numeric only';
+                  if (value.length > 11) return 'Phone must be max 11 digits';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+            TextFormField(
+              controller: _emailController,
+              decoration: const InputDecoration(labelText: 'Email'),
+              keyboardType: TextInputType.emailAddress,
+              validator: (v) {
+                final value = (v ?? '').trim();
+                if (value.isEmpty) return 'Email is required';
+                if (!RegExp(r'^[\w\-.]+@([\w-]+\.)+[\w-]{2,}$').hasMatch(value)) {
+                  return 'Enter a valid email';
+                }
+                return null;
               },
-              child: const Text('Forgot password?'),
             ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _passwordController,
+              decoration: const InputDecoration(labelText: 'Password'),
+              obscureText: true,
+              validator: (v) {
+                final value = v ?? '';
+                if (value.isEmpty) return 'Password is required';
+                if (value.length < 6) return 'Password must be at least 6 characters';
+                return null;
+              },
+            ),
+            if (isRegister) ...[
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _confirmPasswordController,
+                decoration: const InputDecoration(labelText: 'Confirm password'),
+                obscureText: true,
+                validator: (v) {
+                  if ((v ?? '').isEmpty) return 'Please confirm password';
+                  if (v != _passwordController.text) return 'Passwords do not match';
+                  return null;
+                },
+              ),
+            ],
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: loading
+                  ? null
+                  : () async {
+                      if (!_formKey.currentState!.validate()) return;
+                      if (isRegister) {
+                        await ref.read(authControllerProvider.notifier).register(
+                              fullName: _fullNameController.text.trim(),
+                              phoneNumber: _phoneController.text.trim().isEmpty
+                                  ? null
+                                  : _phoneController.text.trim(),
+                              email: _emailController.text.trim(),
+                              password: _passwordController.text,
+                            );
+                      } else {
+                        await ref.read(authControllerProvider.notifier).login(
+                              email: _emailController.text.trim(),
+                              password: _passwordController.text,
+                            );
+                      }
+
+                      final latest = ref.read(authControllerProvider);
+                      if (!latest.hasError && context.mounted) {
+                        Navigator.of(context).pop();
+                      }
+                    },
+              child: Text(isRegister ? 'Create Account' : 'Sign In'),
+            ),
+            if (authState.hasError) ...[
+              const SizedBox(height: 10),
+              Text(
+                userFriendlyError(
+                  authState.error ?? Exception('Authentication failed'),
+                  fallback: 'Authentication failed. Please check your details and try again.',
+                ),
+                style: const TextStyle(color: Colors.red),
+              ),
+            ],
+            if (!isRegister) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+                  );
+                },
+                child: const Text('Forgot password?'),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

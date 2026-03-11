@@ -10,6 +10,7 @@ class OfflineSyncService {
   static const _kPendingOps = 'sync_pending_ops';
   static const _kStatus = 'sync_status';
   static const _kLastError = 'sync_last_error';
+  static const _kConflicts = 'sync_conflicts';
 
   final Dio _dio;
 
@@ -45,6 +46,7 @@ class OfflineSyncService {
       'path': path,
       'data': data ?? <String, dynamic>{},
       'attempts': 0,
+      'queued_at': DateTime.now().toIso8601String(),
     });
     await prefs.setString(_kPendingOps, jsonEncode(queue));
     await prefs.setString(_kStatus, 'pending');
@@ -73,6 +75,7 @@ class OfflineSyncService {
     }
 
     await prefs.setString(_kStatus, 'syncing');
+    final conflicts = await syncConflicts();
     final remaining = <Map<String, dynamic>>[];
     for (final op in queue) {
       try {
@@ -81,6 +84,28 @@ class OfflineSyncService {
           data: Map<String, dynamic>.from((op['data'] ?? <String, dynamic>{}) as Map),
           options: Options(method: (op['method'] as String?) ?? 'POST'),
         );
+      } on DioException catch (error) {
+        final statusCode = error.response?.statusCode ?? 0;
+        if (statusCode == 409) {
+          final response = error.response?.data;
+          final map = response is Map ? Map<String, dynamic>.from(response) : <String, dynamic>{};
+          conflicts.add({
+            'method': op['method'],
+            'path': op['path'],
+            'data': op['data'],
+            'queued_at': op['queued_at'],
+            'occurred_at': DateTime.now().toIso8601String(),
+            'server': map,
+          });
+          await prefs.setString(_kStatus, 'conflict');
+          await prefs.setString(_kLastError, 'Conflict detected. Review and resolve.');
+          continue;
+        }
+        final attempts = ((op['attempts'] ?? 0) as int) + 1;
+        op['attempts'] = attempts;
+        remaining.add(op);
+        await prefs.setString(_kStatus, 'failed');
+        await prefs.setString(_kLastError, error.toString());
       } catch (error) {
         final attempts = ((op['attempts'] ?? 0) as int) + 1;
         op['attempts'] = attempts;
@@ -91,10 +116,31 @@ class OfflineSyncService {
     }
 
     await prefs.setString(_kPendingOps, jsonEncode(remaining));
+    await prefs.setString(_kConflicts, jsonEncode(conflicts));
     if (remaining.isEmpty) {
-      await prefs.setString(_kStatus, 'synced');
-      await prefs.remove(_kLastError);
+      if (conflicts.isEmpty) {
+        await prefs.setString(_kStatus, 'synced');
+        await prefs.remove(_kLastError);
+      } else {
+        await prefs.setString(_kStatus, 'conflict');
+      }
     }
+  }
+
+  Future<List<Map<String, dynamic>>> syncConflicts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kConflicts);
+    if (raw == null || raw.isEmpty) return [];
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) return [];
+    return decoded.map<Map<String, dynamic>>((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
+
+  Future<void> clearConflicts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kConflicts);
+    final pending = await pendingOperations();
+    await prefs.setString(_kStatus, pending.isEmpty ? 'synced' : 'pending');
   }
 
   Future<Map<String, dynamic>> status() async {
@@ -104,6 +150,7 @@ class OfflineSyncService {
       'state': prefs.getString(_kStatus) ?? 'synced',
       'pending_count': pending.length,
       'last_error': prefs.getString(_kLastError),
+      'conflict_count': (await syncConflicts()).length,
     };
   }
 }
@@ -114,4 +161,8 @@ final offlineSyncServiceProvider = Provider<OfflineSyncService>((ref) {
 
 final syncStatusProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   return ref.watch(offlineSyncServiceProvider).status();
+});
+
+final syncConflictsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  return ref.watch(offlineSyncServiceProvider).syncConflicts();
 });

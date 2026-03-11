@@ -6,33 +6,43 @@ class UpgradeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Upgrade to Paid Plan')),
+      appBar: AppBar(title: const Text('Choose Your Plan')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Protect Your Business Data', style: Theme.of(context).textTheme.headlineSmall),
+            Text('Grow Your Tailoring Business', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 10),
             const Text(
-              'Upgrade to unlock cloud backup, restore on new phone, unlimited customers, export, and multiple devices.',
+              'Starter includes up to 50 customers. Upgrade for cloud backup, export, multi-device, and higher limits.',
             ),
             const SizedBox(height: 16),
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Paid Plan Includes:'),
-                    SizedBox(height: 8),
-                    Text('• Cloud backup & restore'),
-                    Text('• Unlimited customers'),
-                    Text('• Measurement export'),
-                    Text('• Multi-device access'),
-                  ],
-                ),
-              ),
+            const _PlanCard(
+              title: 'Starter (Free)',
+              points: [
+                'Up to 50 customers',
+                'Offline usage',
+                'Basic due-date reminders',
+              ],
+            ),
+            const SizedBox(height: 10),
+            const _PlanCard(
+              title: 'Growth',
+              points: [
+                'Up to 500 customers',
+                'Cloud backup & restore',
+                'Measurement export',
+              ],
+            ),
+            const SizedBox(height: 10),
+            const _PlanCard(
+              title: 'Pro',
+              points: [
+                'Unlimited customers',
+                'Multi-device access',
+                'Advanced reminder options',
+              ],
             ),
             const Spacer(),
             ElevatedButton(
@@ -43,6 +53,30 @@ class UpgradeScreen extends StatelessWidget {
               },
               child: const Text('Upgrade Now'),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanCard extends StatelessWidget {
+  const _PlanCard({required this.title, required this.points});
+
+  final String title;
+  final List<String> points;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            for (final point in points) Text('• $point'),
           ],
         ),
       ),

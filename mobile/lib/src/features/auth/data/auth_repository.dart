@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +15,7 @@ class AuthRepository {
   static const _kUserId = 'session_user_id';
   static const _kToken = 'session_token';
   static const _kMode = 'session_mode';
+  static const _kGuestDeviceId = 'guest_device_id';
 
   Future<AuthSession?> restoreSession() async {
     final prefs = await SharedPreferences.getInstance();
@@ -26,13 +29,19 @@ class AuthRepository {
   }
 
   Future<void> clearSession() async {
+    try {
+      await _dio.post('/api/auth/logout');
+    } catch (_) {
+      // Non-blocking: clear local session regardless.
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kUserId);
     await prefs.remove(_kToken);
     await prefs.remove(_kMode);
   }
 
-  Future<AuthSession> startGuest({required String deviceId, required String deviceName}) async {
+  Future<AuthSession> startGuest({required String deviceName}) async {
+    final deviceId = await _getOrCreateGuestDeviceId();
     final response = await _dio.post(
       '/api/auth/guest-start',
       data: {
@@ -50,8 +59,24 @@ class AuthRepository {
     return session;
   }
 
+  Future<String> _getOrCreateGuestDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = prefs.getString(_kGuestDeviceId);
+    if (existing != null && existing.isNotEmpty) {
+      return existing;
+    }
+
+    final random = Random.secure();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final nonce = random.nextInt(1 << 32).toRadixString(16);
+    final deviceId = 'dev-$ts-$nonce';
+    await prefs.setString(_kGuestDeviceId, deviceId);
+    return deviceId;
+  }
+
   Future<AuthSession> register({
     required String fullName,
+    String? phoneNumber,
     required String email,
     required String password,
     String? guestUserId,
@@ -60,6 +85,7 @@ class AuthRepository {
       '/api/auth/register',
       data: {
         'full_name': fullName,
+        'phone_number': phoneNumber,
         'email': email,
         'password': password,
         if (guestUserId != null && guestUserId.isNotEmpty) 'guest_user_id': guestUserId,
@@ -105,12 +131,14 @@ class AuthRepository {
   Future<void> updateProfile({
     required String fullName,
     required String email,
+    String? phoneNumber,
   }) async {
     await _dio.patch(
       '/api/auth/profile',
       data: {
         'full_name': fullName,
         'email': email,
+        'phone_number': phoneNumber,
       },
     );
   }

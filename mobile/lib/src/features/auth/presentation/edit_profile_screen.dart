@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/error_message.dart';
 import '../data/auth_repository.dart';
 
 final _emailRegex = RegExp(r'^[\w\-\.]+@[\w\-]+(\.[\w\-]+)+$');
@@ -16,6 +17,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   bool _loading = true;
   bool _saving = false;
 
@@ -29,6 +31,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   void dispose() {
     _fullNameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -37,6 +40,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       final profile = await ref.read(authRepositoryProvider).fetchProfile();
       _fullNameController.text = (profile['full_name'] ?? '').toString();
       _emailController.text = (profile['email'] ?? '').toString();
+      _phoneController.text = (profile['phone_number'] ?? '').toString();
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
@@ -66,11 +70,32 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     TextFormField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(labelText: 'Email (optional)'),
+                      decoration: const InputDecoration(labelText: 'Email'),
                       validator: (v) {
                         final s = (v ?? '').trim();
-                        if (s.isEmpty) return null;
+                        if (s.isEmpty) return 'Email is required';
                         if (!_emailRegex.hasMatch(s)) return 'Enter a valid email';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 11,
+                      decoration: const InputDecoration(
+                        labelText: 'Phone number (optional)',
+                        hintText: 'e.g. 08012345678',
+                      ),
+                      validator: (v) {
+                        final value = (v ?? '').trim();
+                        if (value.isEmpty) return null;
+                        if (!RegExp(r'^\d+$').hasMatch(value)) {
+                          return 'Phone must be numeric only';
+                        }
+                        if (value.length > 11) {
+                          return 'Phone must be max 11 digits';
+                        }
                         return null;
                       },
                     ),
@@ -85,6 +110,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               await ref.read(authRepositoryProvider).updateProfile(
                                     fullName: _fullNameController.text.trim(),
                                     email: _emailController.text.trim(),
+                                    phoneNumber: _phoneController.text.trim().isEmpty
+                                        ? null
+                                        : _phoneController.text.trim(),
                                   );
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -93,7 +121,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             } catch (error) {
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Could not update profile: $error')),
+                                SnackBar(
+                                  content: Text(
+                                    userFriendlyError(
+                                      error,
+                                      fallback: 'Could not update profile. Please try again.',
+                                    ),
+                                  ),
+                                ),
                               );
                             } finally {
                               if (mounted) setState(() => _saving = false);

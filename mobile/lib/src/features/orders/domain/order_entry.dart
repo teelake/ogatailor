@@ -8,6 +8,7 @@ class OrderEntry {
     required this.amountTotal,
     this.dueDate,
     this.notes,
+    this.lastModifiedAt,
   });
 
   final String id;
@@ -18,6 +19,7 @@ class OrderEntry {
   final double amountTotal;
   final DateTime? dueDate;
   final String? notes;
+  final DateTime? lastModifiedAt;
 
   factory OrderEntry.fromJson(Map<String, dynamic> json) {
     return OrderEntry(
@@ -29,6 +31,7 @@ class OrderEntry {
       amountTotal: double.tryParse((json['amount_total'] ?? '0').toString()) ?? 0,
       dueDate: DateTime.tryParse((json['due_date'] ?? '').toString()),
       notes: json['notes'] as String?,
+      lastModifiedAt: DateTime.tryParse((json['last_modified_at'] ?? '').toString()),
     );
   }
 }

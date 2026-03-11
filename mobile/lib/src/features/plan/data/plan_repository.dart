@@ -13,7 +13,7 @@ class PlanRepository {
     final response = await _dio.get('/api/plan/summary');
     final data = Map<String, dynamic>.from(response.data as Map);
     return PlanSummary(
-      planCode: (data['plan_code'] ?? 'free') as String,
+      planCode: (data['plan_code'] ?? 'starter') as String,
       customerCount: (data['customer_count'] ?? 0) as int,
       customerLimit: data['customer_limit'] as int?,
     );

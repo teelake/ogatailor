@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/phone_launcher.dart';
@@ -81,7 +82,7 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
                     const SizedBox(height: 6),
                     _TappablePhone(phoneNumber: _customer.phoneNumber),
                     const SizedBox(height: 6),
-                    Text('Gender: ${_customer.gender.toUpperCase()}'),
+                    Text('Gender: ${_formatGender(_customer.gender)}'),
                     if ((_customer.notes ?? '').isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(_customer.notes!),
@@ -115,7 +116,18 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(when, style: Theme.of(context).textTheme.titleSmall),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(when, style: Theme.of(context).textTheme.titleSmall),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Share measurement',
+                                      onPressed: () => _shareMeasurement(entry),
+                                      icon: const Icon(Icons.share_rounded),
+                                    ),
+                                  ],
+                                ),
                                 const SizedBox(height: 8),
                                 Wrap(
                                   spacing: 8,
@@ -156,6 +168,12 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
         .join(' ');
   }
 
+  String _formatGender(String value) {
+    final v = value.trim();
+    if (v.isEmpty) return '-';
+    return '${v[0].toUpperCase()}${v.substring(1).toLowerCase()}';
+  }
+
   Future<void> _editMeasurement(MeasurementEntry entry) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -167,6 +185,35 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
       ),
     );
     ref.invalidate(customerMeasurementsProvider(_customer.id));
+  }
+
+  Future<void> _shareMeasurement(MeasurementEntry entry) async {
+    final takenAt = DateFormat('dd MMM yyyy, h:mm a').format(entry.takenAt.toLocal());
+    final unit = (entry.payload['unit'] ?? 'inches') as String;
+    final suffix = unit == 'cm' ? 'cm' : 'in';
+
+    final lines = <String>[
+      'Oga Tailor - Measurement Record',
+      'Customer: ${_customer.fullName}',
+      if ((_customer.phoneNumber ?? '').isNotEmpty) 'Phone: ${_customer.phoneNumber}',
+      'Taken: $takenAt',
+      'Unit: ${unit == 'cm' ? 'Centimetres' : 'Inches'}',
+      '',
+      'Measurements:',
+    ];
+
+    final items = entry.payload.entries.where((e) => e.key != 'notes' && e.key != 'unit');
+    for (final item in items) {
+      lines.add('- ${_formatKey(item.key)}: ${item.value} $suffix');
+    }
+    final notes = (entry.payload['notes'] ?? '').toString().trim();
+    if (notes.isNotEmpty) {
+      lines..add('')..add('Notes: $notes');
+    }
+
+    await SharePlus.instance.share(
+      ShareParams(text: lines.join('\n')),
+    );
   }
 
   Future<void> _onMenuAction(String action, bool hasSession) async {

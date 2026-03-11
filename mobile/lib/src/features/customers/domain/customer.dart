@@ -5,6 +5,7 @@ class Customer {
     required this.gender,
     this.phoneNumber,
     this.notes,
+    this.lastModifiedAt,
   });
 
   final String id;
@@ -12,6 +13,7 @@ class Customer {
   final String gender;
   final String? phoneNumber;
   final String? notes;
+  final DateTime? lastModifiedAt;
 
   factory Customer.fromJson(Map<String, dynamic> json) {
     return Customer(
@@ -20,6 +22,7 @@ class Customer {
       gender: (json['gender'] ?? 'other') as String,
       phoneNumber: json['phone_number'] as String?,
       notes: json['notes'] as String?,
+      lastModifiedAt: DateTime.tryParse((json['last_modified_at'] ?? '').toString()),
     );
   }
 }

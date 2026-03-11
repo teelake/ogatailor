@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../../../core/preferences/measurement_unit_provider.dart';
+import '../../../core/utils/error_message.dart';
 import '../application/customers_controller.dart';
 import '../domain/measurement_entry.dart';
 
@@ -104,14 +105,24 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
     return TextFormField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      maxLength: 6,
       decoration: InputDecoration(labelText: label),
       validator: (value) {
-        if (value == null || value.trim().isEmpty) {
-          return '$label is required';
+        final raw = (value ?? '').trim();
+        if (raw.isEmpty) {
+          return null; // Optional field
         }
-        if (double.tryParse(value.trim()) == null) {
-          return 'Enter a valid number';
+
+        final numericPattern = RegExp(r'^\d{1,3}(\.\d{1,2})?$');
+        if (!numericPattern.hasMatch(raw)) {
+          return 'Use numbers only (up to 3 digits, optional 2 decimals)';
         }
+
+        final parsed = double.tryParse(raw);
+        if (parsed == null) return 'Enter a valid number';
+        if (parsed < 0) return 'Value cannot be negative';
+        if (parsed > 300) return 'Value is too high for tailoring measurements';
+
         return null;
       },
     );
@@ -201,7 +212,9 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
       final unit = ref.read(measurementUnitProvider);
       final payload = <String, dynamic>{};
       for (final entry in _measurementControllers.entries) {
-        payload[entry.key] = double.parse(entry.value.text.trim());
+        final raw = entry.value.text.trim();
+        if (raw.isEmpty) continue;
+        payload[entry.key] = double.parse(raw);
       }
       payload['notes'] = _notesController.text.trim();
       payload['unit'] = unit == MeasurementUnit.inches ? 'inches' : 'cm';
@@ -217,6 +230,7 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
               measurementId: widget.measurement!.id,
               takenAt: DateTime.now(),
               payload: payload,
+              lastKnownModifiedAt: widget.measurement?.lastModifiedAt,
             );
       }
 
@@ -226,7 +240,14 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save measurement: $error')),
+        SnackBar(
+          content: Text(
+            userFriendlyError(
+              error,
+              fallback: 'Could not save measurement. Please try again.',
+            ),
+          ),
+        ),
       );
     } finally {
       if (mounted) {

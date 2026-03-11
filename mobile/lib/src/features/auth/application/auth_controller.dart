@@ -19,7 +19,6 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
     state = const AsyncValue.loading();
     state = await AsyncValue.guard(
       () => _repository.startGuest(
-        deviceId: 'local-device-1',
         deviceName: 'Tailor Device',
       ),
     );
@@ -27,6 +26,7 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
 
   Future<void> register({
     required String fullName,
+    String? phoneNumber,
     required String email,
     required String password,
   }) async {
@@ -35,6 +35,7 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
     state = await AsyncValue.guard(
       () => _repository.register(
         fullName: fullName,
+        phoneNumber: phoneNumber,
         email: email,
         password: password,
         guestUserId: current?.mode == 'guest' ? current?.userId : null,

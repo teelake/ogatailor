@@ -15,15 +15,63 @@ class CustomersRepository {
   final OfflineSyncService _offlineSync;
 
   Future<List<Customer>> listCustomers() async {
+    final all = <Customer>[];
+    var offset = 0;
+    const limit = 200;
+    while (true) {
+      final page = await listCustomersPage(limit: limit, offset: offset);
+      all.addAll(page.items);
+      if (!page.hasMore || page.items.isEmpty) break;
+      offset += page.items.length;
+    }
+    return all;
+  }
+
+  Future<CustomersPage> listCustomersPage({
+    required int limit,
+    required int offset,
+    String? query,
+  }) async {
     try {
-      final response = await _dio.get('/api/customers');
+      final response = await _dio.get(
+        '/api/customers',
+        queryParameters: {
+          'limit': limit,
+          'offset': offset,
+          if ((query ?? '').trim().isNotEmpty) 'q': query!.trim(),
+        },
+      );
       final data = Map<String, dynamic>.from(response.data as Map);
       final rows = List<Map<String, dynamic>>.from(data['data'] as List<dynamic>);
-      await _offlineSync.saveCache('cache_customers', rows);
-      return rows.map(Customer.fromJson).toList();
+      if (offset == 0 && (query == null || query.trim().isEmpty)) {
+        await _offlineSync.saveCache('cache_customers', rows);
+      }
+      final meta = Map<String, dynamic>.from((data['meta'] ?? const <String, dynamic>{}) as Map);
+      return CustomersPage(
+        items: rows.map(Customer.fromJson).toList(),
+        total: (meta['total'] ?? rows.length) as int,
+        hasMore: (meta['has_more'] ?? false) as bool,
+      );
     } catch (_) {
       final rows = await _offlineSync.readCache('cache_customers');
-      return rows.map(Customer.fromJson).toList();
+      final q = (query ?? '').trim().toLowerCase();
+      final filtered = q.isEmpty
+          ? rows
+          : rows
+              .where(
+                (r) =>
+                    ((r['full_name'] ?? '').toString().toLowerCase().contains(q)) ||
+                    ((r['phone_number'] ?? '').toString().toLowerCase().contains(q)),
+              )
+              .toList();
+      final safeOffset = offset.clamp(0, filtered.length) as int;
+      final end = (safeOffset + limit).clamp(0, filtered.length) as int;
+      final slice = filtered.sublist(safeOffset, end);
+      return CustomersPage(
+        items: slice.map(Customer.fromJson).toList(),
+        total: filtered.length,
+        hasMore: end < filtered.length,
+      );
     }
   }
 
@@ -63,6 +111,7 @@ class CustomersRepository {
     required String gender,
     String? phoneNumber,
     String? notes,
+    DateTime? lastKnownModifiedAt,
   }) async {
     final body = {
       'customer_id': customerId,
@@ -70,6 +119,7 @@ class CustomersRepository {
       'gender': gender,
       'phone_number': phoneNumber,
       'notes': notes,
+      if (lastKnownModifiedAt != null) 'client_last_modified_at': lastKnownModifiedAt.toIso8601String(),
     };
     try {
       await _dio.patch('/api/customers', data: body);
@@ -155,11 +205,13 @@ class CustomersRepository {
     required String measurementId,
     required DateTime takenAt,
     required Map<String, dynamic> payload,
+    DateTime? lastKnownModifiedAt,
   }) async {
     final body = {
       'measurement_id': measurementId,
       'taken_at': DateFormat('yyyy-MM-dd HH:mm:ss').format(takenAt),
       'payload': payload,
+      if (lastKnownModifiedAt != null) 'client_last_modified_at': lastKnownModifiedAt.toIso8601String(),
     };
     try {
       await _dio.patch('/api/measurements', data: body);
@@ -168,4 +220,16 @@ class CustomersRepository {
       await _offlineSync.enqueue(method: 'PATCH', path: '/api/measurements', data: body);
     }
   }
+}
+
+class CustomersPage {
+  const CustomersPage({
+    required this.items,
+    required this.total,
+    required this.hasMore,
+  });
+
+  final List<Customer> items;
+  final int total;
+  final bool hasMore;
 }

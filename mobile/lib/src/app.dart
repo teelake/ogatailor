@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/notifications/order_reminder_service.dart';
 import 'core/sync/offline_sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/application/auth_controller.dart';
@@ -57,6 +58,7 @@ class _AuthenticatedHomeState extends ConsumerState<_AuthenticatedHome> {
   }
 
   Future<void> _syncNow() async {
+    await ref.read(orderReminderServiceProvider).initialize();
     await ref.read(offlineSyncServiceProvider).processQueue();
     if (mounted) ref.invalidate(syncStatusProvider);
   }

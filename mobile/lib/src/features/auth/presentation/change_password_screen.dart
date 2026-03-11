@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/error_message.dart';
 import '../data/auth_repository.dart';
 
 const _minPasswordLength = 6;
@@ -78,26 +79,35 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                     ? null
                     : () async {
                         if (!_formKey.currentState!.validate()) return;
+                        final messenger = ScaffoldMessenger.of(context);
+                        final navigator = Navigator.of(context);
                         setState(() => _saving = true);
-                      try {
-                        await ref.read(authRepositoryProvider).changePassword(
-                              currentPassword: _currentController.text,
-                              newPassword: _newController.text,
-                            );
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Password changed')),
-                        );
-                        Navigator.of(context).pop();
-                      } catch (error) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Could not change password: $error')),
-                        );
-                      } finally {
-                        if (mounted) setState(() => _saving = false);
-                      }
-                    },
+                        try {
+                          await ref.read(authRepositoryProvider).changePassword(
+                                currentPassword: _currentController.text,
+                                newPassword: _newController.text,
+                              );
+                          if (!mounted) return;
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Password changed')),
+                          );
+                          navigator.pop();
+                        } catch (error) {
+                          if (!mounted) return;
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                userFriendlyError(
+                                  error,
+                                  fallback: 'Could not change password. Please try again.',
+                                ),
+                              ),
+                            ),
+                          );
+                        } finally {
+                          if (mounted) setState(() => _saving = false);
+                        }
+                      },
                 child: Text(_saving ? 'Saving...' : 'Change Password'),
               ),
             ],

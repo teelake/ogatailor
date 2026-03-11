@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/utils/error_message.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../customers/application/customers_controller.dart';
+import '../../customers/domain/customer.dart';
 import '../application/orders_controller.dart';
 import '../data/orders_repository.dart';
 import '../domain/order_entry.dart';
@@ -157,6 +159,7 @@ class _OrderCard extends ConsumerWidget {
                         await ref.read(ordersRepositoryProvider).updateStatus(
                               orderId: order.id,
                               status: value,
+                              lastKnownModifiedAt: order.lastModifiedAt,
                             );
                         ref.invalidate(ordersProvider);
                       },
@@ -177,11 +180,13 @@ class _CreateOrderSheet extends ConsumerStatefulWidget {
 }
 
 class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
+  static const _pageSize = 30;
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
   String? _selectedCustomerId;
+  String? _selectedCustomerName;
   DateTime? _selectedDueDate;
   bool _saving = false;
 
@@ -195,7 +200,6 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final customersAsync = ref.watch(customersProvider);
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -203,114 +207,289 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
         top: 16,
         bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: customersAsync.when(
-        data: (customers) => Form(
-          key: _formKey,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              Text('Create Order', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _selectedCustomerId,
-                decoration: const InputDecoration(labelText: 'Customer'),
-                items: customers
-                    .map((c) => DropdownMenuItem(value: c.id, child: Text(c.fullName)))
-                    .toList(),
-                onChanged: (value) => setState(() => _selectedCustomerId = value),
-                validator: (value) => value == null ? 'Select customer' : null,
+      child: Form(
+        key: _formKey,
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Text('Create Order', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Customer'),
+              subtitle: Text(_selectedCustomerName ?? 'Tap to search and select a customer'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: _saving ? null : _openCustomerPicker,
+            ),
+            if (_selectedCustomerId == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Customer is required',
+                  style: TextStyle(color: Colors.red, fontSize: 12),
+                ),
               ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(labelText: 'Order title'),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty ? 'Order title is required' : null,
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _titleController,
+              decoration: const InputDecoration(labelText: 'Order title'),
+              validator: (value) =>
+                  value == null || value.trim().isEmpty ? 'Order title is required' : null,
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _amountController,
+              decoration: const InputDecoration(labelText: 'Amount (NGN)'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (value) {
+                final n = double.tryParse((value ?? '').trim());
+                if (n == null) return 'Enter a valid amount';
+                if (n < 0) return 'Amount cannot be negative';
+                return null;
+              },
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _notesController,
+              decoration: const InputDecoration(labelText: 'Notes'),
+              maxLines: 3,
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Due date'),
+              subtitle: Text(
+                _selectedDueDate == null
+                    ? 'No due date'
+                    : DateFormat('dd MMM yyyy').format(_selectedDueDate!.toLocal()),
               ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _amountController,
-                decoration: const InputDecoration(labelText: 'Amount (NGN)'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                validator: (value) {
-                  final n = double.tryParse((value ?? '').trim());
-                  if (n == null) return 'Enter a valid amount';
-                  if (n < 0) return 'Amount cannot be negative';
-                  return null;
+              trailing: IconButton(
+                icon: const Icon(Icons.date_range_rounded),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                    lastDate: DateTime.now().add(const Duration(days: 3650)),
+                    initialDate: _selectedDueDate ?? DateTime.now(),
+                  );
+                  if (picked != null && mounted) {
+                    setState(() => _selectedDueDate = picked);
+                  }
                 },
               ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      if (!_formKey.currentState!.validate()) {
+                        return;
+                      }
+                      if (_selectedCustomerId == null) {
+                        setState(() {});
+                        return;
+                      }
+                      setState(() => _saving = true);
+                      try {
+                        await ref.read(ordersRepositoryProvider).createOrder(
+                              customerId: _selectedCustomerId!,
+                              title: _titleController.text.trim(),
+                              status: 'pending',
+                              amountTotal: double.parse(_amountController.text.trim()),
+                              notes: _notesController.text.trim().isEmpty
+                                  ? null
+                                  : _notesController.text.trim(),
+                              dueDate: _selectedDueDate,
+                            );
+                        if (!mounted) return;
+                        Navigator.of(context).pop();
+                      } catch (error) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              userFriendlyError(
+                                error,
+                                fallback: 'Could not create order. Please try again.',
+                              ),
+                            ),
+                          ),
+                        );
+                      } finally {
+                        if (mounted) setState(() => _saving = false);
+                      }
+                    },
+              child: Text(_saving ? 'Saving...' : 'Save Order'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCustomerPicker() async {
+    final selected = await showModalBottomSheet<Customer>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _CustomerPickerSheet(pageSize: _pageSize),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _selectedCustomerId = selected.id;
+      _selectedCustomerName = selected.fullName;
+    });
+  }
+}
+
+class _CustomerPickerSheet extends ConsumerStatefulWidget {
+  const _CustomerPickerSheet({required this.pageSize});
+
+  final int pageSize;
+
+  @override
+  ConsumerState<_CustomerPickerSheet> createState() => _CustomerPickerSheetState();
+}
+
+class _CustomerPickerSheetState extends ConsumerState<_CustomerPickerSheet> {
+  final _searchController = TextEditingController();
+  String _query = '';
+  bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
+  int _offset = 0;
+  List<Customer> _items = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(_loadInitial);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 12,
+          bottom: 12 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.75,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Select Customer', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 10),
-              TextFormField(
-                controller: _notesController,
-                decoration: const InputDecoration(labelText: 'Notes'),
-                maxLines: 3,
+              TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  hintText: 'Search customer by name or phone',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
+                onChanged: (v) => setState(() => _query = v.trim()),
+                onSubmitted: (_) => _loadInitial(),
               ),
               const SizedBox(height: 10),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Due date'),
-                subtitle: Text(
-                  _selectedDueDate == null
-                      ? 'No due date'
-                      : DateFormat('dd MMM yyyy').format(_selectedDueDate!.toLocal()),
-                ),
-                trailing: IconButton(
-                  icon: const Icon(Icons.date_range_rounded),
-                  onPressed: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                      lastDate: DateTime.now().add(const Duration(days: 3650)),
-                      initialDate: _selectedDueDate ?? DateTime.now(),
-                    );
-                    if (picked != null && mounted) {
-                      setState(() => _selectedDueDate = picked);
-                    }
-                  },
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _loadInitial,
+                  child: const Text('Search'),
                 ),
               ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _saving
-                    ? null
-                    : () async {
-                        if (!_formKey.currentState!.validate()) {
-                          return;
-                        }
-                        setState(() => _saving = true);
-                        try {
-                          await ref.read(ordersRepositoryProvider).createOrder(
-                                customerId: _selectedCustomerId!,
-                                title: _titleController.text.trim(),
-                                status: 'pending',
-                                amountTotal: double.parse(_amountController.text.trim()),
-                                notes: _notesController.text.trim().isEmpty
-                                    ? null
-                                    : _notesController.text.trim(),
-                                dueDate: _selectedDueDate,
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _items.isEmpty
+                        ? const Center(child: Text('No customers found'))
+                        : ListView.separated(
+                            itemCount: _items.length + 1,
+                            separatorBuilder: (_, __) => const SizedBox(height: 6),
+                            itemBuilder: (_, index) {
+                              if (index == _items.length) {
+                                if (_loadingMore) {
+                                  return const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 8),
+                                    child: Center(child: CircularProgressIndicator()),
+                                  );
+                                }
+                                if (!_hasMore) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Center(
+                                  child: OutlinedButton(
+                                    onPressed: _loadMore,
+                                    child: const Text('Load more'),
+                                  ),
+                                );
+                              }
+                              final customer = _items[index];
+                              return Card(
+                                child: ListTile(
+                                  title: Text(customer.fullName),
+                                  subtitle: Text(customer.phoneNumber ?? 'No phone'),
+                                  onTap: () => Navigator.of(context).pop(customer),
+                                ),
                               );
-                          if (!mounted) return;
-                          Navigator.of(context).pop();
-                        } catch (error) {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context)
-                              .showSnackBar(SnackBar(content: Text('Could not create order: $error')));
-                        } finally {
-                          if (mounted) setState(() => _saving = false);
-                        }
-                      },
-                child: Text(_saving ? 'Saving...' : 'Save Order'),
+                            },
+                          ),
               ),
             ],
           ),
         ),
-        loading: () => const SizedBox(height: 160, child: Center(child: CircularProgressIndicator())),
-        error: (error, _) => SizedBox(
-          height: 160,
-          child: Center(child: Text('Could not load customers: $error')),
-        ),
       ),
     );
+  }
+
+  Future<void> _loadInitial() async {
+    setState(() {
+      _loading = true;
+      _offset = 0;
+    });
+    try {
+      final page = await ref.read(customersRepositoryProvider).listCustomersPage(
+            limit: widget.pageSize,
+            offset: 0,
+            query: _query,
+          );
+      if (!mounted) return;
+      setState(() {
+        _items = page.items;
+        _hasMore = page.hasMore;
+        _offset = page.items.length;
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await ref.read(customersRepositoryProvider).listCustomersPage(
+            limit: widget.pageSize,
+            offset: _offset,
+            query: _query,
+          );
+      if (!mounted) return;
+      setState(() {
+        _items = [..._items, ...page.items];
+        _hasMore = page.hasMore;
+        _offset += page.items.length;
+      });
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
   }
 }
 
@@ -364,15 +543,30 @@ class _OrderDetailsScreen extends ConsumerWidget {
                   ? null
                   : (value) async {
                       if (value == null || value == order.status) return;
-                      await ref.read(ordersRepositoryProvider).updateStatus(
-                            orderId: order.id,
-                            status: value,
-                          );
-                      ref.invalidate(ordersProvider);
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Order status updated')),
-                      );
+                      try {
+                        await ref.read(ordersRepositoryProvider).updateStatus(
+                              orderId: order.id,
+                              status: value,
+                              lastKnownModifiedAt: order.lastModifiedAt,
+                            );
+                        ref.invalidate(ordersProvider);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Order status updated')),
+                        );
+                      } catch (error) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              userFriendlyError(
+                                error,
+                                fallback: 'Could not update order status. Please try again.',
+                              ),
+                            ),
+                          ),
+                        );
+                      }
                     },
             ),
             const SizedBox(height: 12),
@@ -387,15 +581,30 @@ class _OrderDetailsScreen extends ConsumerWidget {
                         initialDate: order.dueDate ?? DateTime.now(),
                       );
                       if (picked == null) return;
-                      await ref.read(ordersRepositoryProvider).updateDueDate(
-                            orderId: order.id,
-                            dueDate: picked,
-                          );
-                      ref.invalidate(ordersProvider);
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Due date updated')),
-                      );
+                      try {
+                        await ref.read(ordersRepositoryProvider).updateDueDate(
+                              orderId: order.id,
+                              dueDate: picked,
+                              lastKnownModifiedAt: order.lastModifiedAt,
+                            );
+                        ref.invalidate(ordersProvider);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Due date updated')),
+                        );
+                      } catch (error) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              userFriendlyError(
+                                error,
+                                fallback: 'Could not update due date. Please try again.',
+                              ),
+                            ),
+                          ),
+                        );
+                      }
                     },
               icon: const Icon(Icons.edit_calendar_rounded),
               label: const Text('Edit Due Date'),
