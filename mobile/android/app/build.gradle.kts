@@ -24,6 +24,7 @@ android {
         applicationId = "com.example.oga_tailor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // minSdk 23 = Android 6.0 - balance of reach and stability
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
