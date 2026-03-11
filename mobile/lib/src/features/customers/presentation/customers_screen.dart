@@ -32,6 +32,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   int _total = 0;
   String? _error;
   List<Customer> _items = const [];
+  String _alphaFilter = 'all';
 
   @override
   void initState() {
@@ -79,6 +80,27 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             _PlanUsageBanner(summaryAsync: planSummaryAsync),
             const SizedBox(height: 10),
             _SyncStatusBanner(syncStatusAsync: syncStatusAsync),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _alphaOptions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (_, index) {
+                  final option = _alphaOptions[index];
+                  final selected = option == _alphaFilter;
+                  return ChoiceChip(
+                    label: Text(option.toUpperCase()),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() => _alphaFilter = option);
+                      _reload();
+                    },
+                  );
+                },
+              ),
+            ),
             const SizedBox(height: 10),
             TextField(
               controller: _queryController,
@@ -182,7 +204,8 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       final page = await ref.read(customersRepositoryProvider).listCustomersPage(
             limit: _pageSize,
             offset: 0,
-            query: _query,
+            query: _query.trim(),
+            startsWith: _alphaFilter == 'all' ? null : _alphaFilter,
           );
       if (!mounted) return;
       setState(() {
@@ -206,7 +229,8 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       final page = await ref.read(customersRepositoryProvider).listCustomersPage(
             limit: _pageSize,
             offset: _offset,
-            query: _query,
+            query: _query.trim(),
+            startsWith: _alphaFilter == 'all' ? null : _alphaFilter,
           );
       if (!mounted) return;
       setState(() {
@@ -220,6 +244,36 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     }
   }
 }
+
+const _alphaOptions = [
+  'all',
+  'a',
+  'b',
+  'c',
+  'd',
+  'e',
+  'f',
+  'g',
+  'h',
+  'i',
+  'j',
+  'k',
+  'l',
+  'm',
+  'n',
+  'o',
+  'p',
+  'q',
+  'r',
+  's',
+  't',
+  'u',
+  'v',
+  'w',
+  'x',
+  'y',
+  'z',
+];
 
 class _PlanBadge extends StatelessWidget {
   const _PlanBadge({

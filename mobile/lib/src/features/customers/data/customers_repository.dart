@@ -31,6 +31,7 @@ class CustomersRepository {
     required int limit,
     required int offset,
     String? query,
+    String? startsWith,
   }) async {
     try {
       final response = await _dio.get(
@@ -39,6 +40,7 @@ class CustomersRepository {
           'limit': limit,
           'offset': offset,
           if ((query ?? '').trim().isNotEmpty) 'q': query!.trim(),
+          if ((startsWith ?? '').trim().isNotEmpty) 'starts_with': startsWith!.trim().toLowerCase(),
         },
       );
       final data = Map<String, dynamic>.from(response.data as Map);
@@ -55,6 +57,7 @@ class CustomersRepository {
     } catch (_) {
       final rows = await _offlineSync.readCache('cache_customers');
       final q = (query ?? '').trim().toLowerCase();
+      final sw = (startsWith ?? '').trim().toLowerCase();
       final filtered = q.isEmpty
           ? rows
           : rows
@@ -64,13 +67,16 @@ class CustomersRepository {
                     ((r['phone_number'] ?? '').toString().toLowerCase().contains(q)),
               )
               .toList();
-      final safeOffset = offset.clamp(0, filtered.length) as int;
-      final end = (safeOffset + limit).clamp(0, filtered.length) as int;
-      final slice = filtered.sublist(safeOffset, end);
+      final startsFiltered = sw.isEmpty
+          ? filtered
+          : filtered.where((r) => ((r['full_name'] ?? '').toString().toLowerCase().startsWith(sw))).toList();
+      final safeOffset = offset.clamp(0, startsFiltered.length) as int;
+      final end = (safeOffset + limit).clamp(0, startsFiltered.length) as int;
+      final slice = startsFiltered.sublist(safeOffset, end);
       return CustomersPage(
         items: slice.map(Customer.fromJson).toList(),
-        total: filtered.length,
-        hasMore: end < filtered.length,
+        total: startsFiltered.length,
+        hasMore: end < startsFiltered.length,
       );
     }
   }

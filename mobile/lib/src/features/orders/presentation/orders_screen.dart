@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/error_message.dart';
 import '../../auth/application/auth_controller.dart';
@@ -9,6 +12,9 @@ import '../../customers/domain/customer.dart';
 import '../application/orders_controller.dart';
 import '../data/orders_repository.dart';
 import '../domain/order_entry.dart';
+
+const _kRecentOrderCustomers = 'recent_order_customers';
+const _kRecentOrderCustomersMax = 8;
 
 class OrdersScreen extends ConsumerStatefulWidget {
   const OrdersScreen({super.key});
@@ -191,6 +197,12 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
   bool _saving = false;
 
   @override
+  void initState() {
+    super.initState();
+    Future.microtask(_prefillMostRecentCustomer);
+  }
+
+  @override
   void dispose() {
     _titleController.dispose();
     _amountController.dispose();
@@ -335,9 +347,50 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
       builder: (_) => const _CustomerPickerSheet(pageSize: _pageSize),
     );
     if (selected == null || !mounted) return;
+    await _saveRecentCustomer(selected);
     setState(() {
       _selectedCustomerId = selected.id;
       _selectedCustomerName = selected.fullName;
+    });
+  }
+
+  Future<void> _saveRecentCustomer(Customer customer) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kRecentOrderCustomers);
+    final decoded = raw == null || raw.isEmpty ? <dynamic>[] : (jsonDecode(raw) as List<dynamic>);
+    final rows = decoded
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .where((m) => (m['id'] ?? '').toString().isNotEmpty)
+        .toList();
+
+    rows.removeWhere((m) => (m['id'] ?? '').toString() == customer.id);
+    rows.insert(0, {
+      'id': customer.id,
+      'full_name': customer.fullName,
+      'phone_number': customer.phoneNumber,
+    });
+    if (rows.length > _kRecentOrderCustomersMax) {
+      rows.removeRange(_kRecentOrderCustomersMax, rows.length);
+    }
+    await prefs.setString(_kRecentOrderCustomers, jsonEncode(rows));
+  }
+
+  Future<void> _prefillMostRecentCustomer() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kRecentOrderCustomers);
+    if (raw == null || raw.isEmpty) return;
+    final decoded = jsonDecode(raw);
+    if (decoded is! List || decoded.isEmpty) return;
+    final first = decoded.first;
+    if (first is! Map) return;
+    final map = Map<String, dynamic>.from(first);
+    final id = (map['id'] ?? '').toString();
+    final name = (map['full_name'] ?? '').toString();
+    if (id.isEmpty || name.isEmpty || !mounted) return;
+    setState(() {
+      _selectedCustomerId = id;
+      _selectedCustomerName = name;
     });
   }
 }
@@ -359,11 +412,15 @@ class _CustomerPickerSheetState extends ConsumerState<_CustomerPickerSheet> {
   bool _hasMore = false;
   int _offset = 0;
   List<Customer> _items = const [];
+  List<Customer> _recent = const [];
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(_loadInitial);
+    Future.microtask(() async {
+      await _loadRecent();
+      await _loadInitial();
+    });
   }
 
   @override
@@ -399,6 +456,24 @@ class _CustomerPickerSheetState extends ConsumerState<_CustomerPickerSheet> {
                 onSubmitted: (_) => _loadInitial(),
               ),
               const SizedBox(height: 10),
+              if (_query.isEmpty && _recent.isNotEmpty) ...[
+                Text('Recent customers', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _recent
+                      .map(
+                        (c) => ActionChip(
+                          avatar: const Icon(Icons.history_rounded, size: 16),
+                          label: Text(c.fullName),
+                          onPressed: () => Navigator.of(context).pop(c),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 10),
+              ],
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
@@ -490,6 +565,39 @@ class _CustomerPickerSheetState extends ConsumerState<_CustomerPickerSheet> {
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
+  }
+
+  Future<void> _loadRecent() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kRecentOrderCustomers);
+    if (raw == null || raw.isEmpty) {
+      if (mounted) setState(() => _recent = const []);
+      return;
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      if (mounted) setState(() => _recent = const []);
+      return;
+    }
+    final rows = decoded
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .where((m) => (m['id'] ?? '').toString().isNotEmpty)
+        .take(_kRecentOrderCustomersMax)
+        .toList();
+    if (!mounted) return;
+    setState(() {
+      _recent = rows
+          .map(
+            (m) => Customer(
+              id: (m['id'] ?? '').toString(),
+              fullName: (m['full_name'] ?? '').toString(),
+              gender: 'other',
+              phoneNumber: (m['phone_number'] ?? '').toString().isEmpty ? null : (m['phone_number'] ?? '').toString(),
+            ),
+          )
+          .toList();
+    });
   }
 }
 
