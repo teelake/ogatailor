@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/sync/offline_sync_service.dart';
 import '../../auth/application/auth_controller.dart';
-import '../../orders/presentation/orders_screen.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/domain/plan_summary.dart';
 import '../../plan/presentation/upgrade_screen.dart';
@@ -42,31 +41,6 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         title: const Text('Customers'),
         actions: [
           _PlanBadge(summaryAsync: planSummaryAsync),
-          IconButton(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const OrdersScreen()),
-              );
-            },
-            icon: const Icon(Icons.assignment_rounded),
-            tooltip: 'Orders',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'logout') {
-                await ref.read(authControllerProvider.notifier).logout();
-              } else if (value == 'upgrade') {
-                if (!mounted) return;
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const UpgradeScreen()),
-                );
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'upgrade', child: Text('Upgrade Plan')),
-              PopupMenuItem(value: 'logout', child: Text('Log out')),
-            ],
-          ),
           const SizedBox(width: 6),
         ],
       ),

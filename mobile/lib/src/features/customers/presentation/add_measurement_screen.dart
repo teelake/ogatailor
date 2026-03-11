@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import '../../../core/preferences/measurement_unit_provider.dart';
 import '../application/customers_controller.dart';
 import '../domain/measurement_entry.dart';
 
@@ -9,10 +10,12 @@ class AddMeasurementScreen extends ConsumerStatefulWidget {
   const AddMeasurementScreen({
     super.key,
     required this.customerId,
+    required this.customerGender,
     this.measurement,
   });
 
   final String customerId;
+  final String customerGender;
   final MeasurementEntry? measurement;
 
   @override
@@ -21,10 +24,7 @@ class AddMeasurementScreen extends ConsumerStatefulWidget {
 
 class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _chestController = TextEditingController();
-  final _waistController = TextEditingController();
-  final _hipController = TextEditingController();
-  final _inseamController = TextEditingController();
+  final Map<String, TextEditingController> _measurementControllers = {};
   final _notesController = TextEditingController();
   final _speech = SpeechToText();
   bool _isListening = false;
@@ -33,28 +33,34 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
   @override
   void initState() {
     super.initState();
+    final keys = _fieldDefinitionsForGender(widget.customerGender).keys.toList();
+    for (final key in keys) {
+      _measurementControllers[key] = TextEditingController();
+    }
+
     final payload = widget.measurement?.payload;
     if (payload != null) {
-      _chestController.text = (payload['chest'] ?? '').toString();
-      _waistController.text = (payload['waist'] ?? '').toString();
-      _hipController.text = (payload['hip'] ?? '').toString();
-      _inseamController.text = (payload['inseam'] ?? '').toString();
+      for (final entry in payload.entries) {
+        if (entry.key == 'notes' || entry.key == 'unit') continue;
+        _measurementControllers.putIfAbsent(entry.key, () => TextEditingController());
+        _measurementControllers[entry.key]!.text = (entry.value ?? '').toString();
+      }
       _notesController.text = (payload['notes'] ?? '').toString();
     }
   }
 
   @override
   void dispose() {
-    _chestController.dispose();
-    _waistController.dispose();
-    _hipController.dispose();
-    _inseamController.dispose();
+    for (final controller in _measurementControllers.values) {
+      controller.dispose();
+    }
     _notesController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final unit = ref.watch(measurementUnitProvider);
     return Scaffold(
       appBar: AppBar(title: Text(widget.measurement == null ? 'Add Measurement' : 'Edit Measurement')),
       body: SafeArea(
@@ -64,13 +70,7 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
             key: _formKey,
             child: ListView(
               children: [
-                _numberField(_chestController, 'Chest (inches)'),
-                const SizedBox(height: 12),
-                _numberField(_waistController, 'Waist (inches)'),
-                const SizedBox(height: 12),
-                _numberField(_hipController, 'Hip (inches)'),
-                const SizedBox(height: 12),
-                _numberField(_inseamController, 'Inseam (inches)'),
+                ..._buildMeasurementFields(unit),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _notesController,
@@ -117,6 +117,80 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
     );
   }
 
+  List<Widget> _buildMeasurementFields(MeasurementUnit unit) {
+    final definitions = _fieldDefinitionsForGender(widget.customerGender);
+    final unitLabel = unit == MeasurementUnit.inches ? 'inches' : 'cm';
+    final fields = <Widget>[];
+    for (final entry in definitions.entries) {
+      final key = entry.key;
+      final label = entry.value;
+      final controller = _measurementControllers[key]!;
+      fields.add(_numberField(controller, '$label ($unitLabel)'));
+      fields.add(const SizedBox(height: 12));
+    }
+    return fields;
+  }
+
+  Map<String, String> _fieldDefinitionsForGender(String gender) {
+    switch (gender.toLowerCase()) {
+      case 'male':
+        return {
+          'head_circumference': 'Head / Cap (Fila)',
+          'neck': 'Neck',
+          'shoulder': 'Shoulder',
+          'chest': 'Chest',
+          'waist': 'Waist',
+          'hip': 'Hip',
+          'sleeve': 'Sleeve',
+          'armhole': 'Armhole',
+          'back_length': 'Back Length',
+          'front_length': 'Front Length',
+          'inseam': 'Inseam',
+          'trouser_length': 'Trouser Length',
+          'thigh': 'Thigh',
+          'knee': 'Knee',
+        };
+      case 'female':
+        return {
+          'head_circumference': 'Head / Cap (Fila)',
+          'neck': 'Neck',
+          'shoulder': 'Shoulder',
+          'chest': 'Chest',
+          'bust': 'Bust',
+          'under_bust': 'Under Bust',
+          'waist': 'Waist',
+          'hip': 'Hip',
+          'sleeve': 'Sleeve',
+          'armhole': 'Armhole',
+          'back_length': 'Back Length',
+          'front_length': 'Front Length',
+          'blouse_length': 'Blouse Length',
+          'gown_length': 'Gown Length',
+          'skirt_length': 'Skirt Length',
+          'inseam': 'Inseam',
+          'trouser_length': 'Trouser Length',
+          'thigh': 'Thigh',
+          'knee': 'Knee',
+        };
+      default:
+        return {
+          'head_circumference': 'Head / Cap (Fila)',
+          'neck': 'Neck',
+          'shoulder': 'Shoulder',
+          'chest': 'Chest',
+          'waist': 'Waist',
+          'hip': 'Hip',
+          'sleeve': 'Sleeve',
+          'armhole': 'Armhole',
+          'back_length': 'Back Length',
+          'inseam': 'Inseam',
+          'trouser_length': 'Trouser Length',
+          'thigh': 'Thigh',
+          'knee': 'Knee',
+        };
+    }
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -124,13 +198,13 @@ class _AddMeasurementScreenState extends ConsumerState<AddMeasurementScreen> {
 
     setState(() => _saving = true);
     try {
-      final payload = <String, dynamic>{
-        'chest': double.parse(_chestController.text.trim()),
-        'waist': double.parse(_waistController.text.trim()),
-        'hip': double.parse(_hipController.text.trim()),
-        'inseam': double.parse(_inseamController.text.trim()),
-        'notes': _notesController.text.trim(),
-      };
+      final unit = ref.read(measurementUnitProvider);
+      final payload = <String, dynamic>{};
+      for (final entry in _measurementControllers.entries) {
+        payload[entry.key] = double.parse(entry.value.text.trim());
+      }
+      payload['notes'] = _notesController.text.trim();
+      payload['unit'] = unit == MeasurementUnit.inches ? 'inches' : 'cm';
 
       if (widget.measurement == null) {
         await ref.read(customersRepositoryProvider).createMeasurement(

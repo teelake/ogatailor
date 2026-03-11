@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/sync/offline_sync_service.dart';
 import '../domain/customer.dart';
+import '../domain/duplicate_customer_exception.dart';
 import '../domain/measurement_entry.dart';
 
 class CustomersRepository {
@@ -28,18 +29,30 @@ class CustomersRepository {
 
   Future<void> createCustomer({
     required String fullName,
+    required String gender,
     String? phoneNumber,
     String? notes,
   }) async {
     final body = {
       'full_name': fullName,
+      'gender': gender,
       'phone_number': phoneNumber,
       'notes': notes,
     };
     try {
       await _dio.post('/api/customers', data: body);
       await _offlineSync.processQueue();
-    } catch (_) {
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 409) {
+        final data = e.response?.data;
+        if (data is Map && (data['error'] == 'duplicate_name')) {
+          throw DuplicateCustomerException(
+            existingCustomerId: (data['existing_customer_id'] ?? '').toString(),
+            customerName: fullName,
+            message: (data['message'] ?? '').toString(),
+          );
+        }
+      }
       await _offlineSync.enqueue(method: 'POST', path: '/api/customers', data: body);
     }
   }
@@ -47,19 +60,31 @@ class CustomersRepository {
   Future<void> updateCustomer({
     required String customerId,
     required String fullName,
+    required String gender,
     String? phoneNumber,
     String? notes,
   }) async {
     final body = {
       'customer_id': customerId,
       'full_name': fullName,
+      'gender': gender,
       'phone_number': phoneNumber,
       'notes': notes,
     };
     try {
       await _dio.patch('/api/customers', data: body);
       await _offlineSync.processQueue();
-    } catch (_) {
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 409) {
+        final data = e.response?.data;
+        if (data is Map && (data['error'] == 'duplicate_name')) {
+          throw DuplicateCustomerException(
+            existingCustomerId: (data['existing_customer_id'] ?? '').toString(),
+            customerName: fullName,
+            message: (data['message'] ?? '').toString(),
+          );
+        }
+      }
       await _offlineSync.enqueue(method: 'PATCH', path: '/api/customers', data: body);
     }
   }

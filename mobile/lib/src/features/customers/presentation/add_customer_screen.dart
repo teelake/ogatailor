@@ -5,6 +5,8 @@ import 'package:speech_to_text/speech_to_text.dart';
 import '../../auth/application/auth_controller.dart';
 import '../application/customers_controller.dart';
 import '../domain/customer.dart';
+import '../domain/duplicate_customer_exception.dart';
+import 'customer_details_screen.dart';
 
 class AddCustomerScreen extends ConsumerStatefulWidget {
   const AddCustomerScreen({
@@ -26,6 +28,7 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
   final _speech = SpeechToText();
   bool _isListening = false;
   bool _saving = false;
+  String _gender = 'female';
 
   @override
   void initState() {
@@ -35,6 +38,7 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
       _nameController.text = customer.fullName;
       _phoneController.text = customer.phoneNumber ?? '';
       _notesController.text = customer.notes ?? '';
+      _gender = customer.gender;
     }
   }
 
@@ -71,8 +75,34 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _phoneController,
-                  decoration: const InputDecoration(labelText: 'Phone number (optional)'),
+                  decoration: const InputDecoration(
+                    labelText: 'Phone number (optional)',
+                    hintText: 'e.g. 08012345678',
+                  ),
                   keyboardType: TextInputType.phone,
+                  maxLength: 11,
+                  validator: (value) {
+                    final v = (value ?? '').trim();
+                    if (v.isEmpty) return null;
+                    if (!RegExp(r'^\d+$').hasMatch(v)) {
+                      return 'Phone must be numeric only';
+                    }
+                    if (v.length > 11) {
+                      return 'Phone must be max 11 digits';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _gender,
+                  decoration: const InputDecoration(labelText: 'Gender'),
+                  items: const [
+                    DropdownMenuItem(value: 'female', child: Text('Female')),
+                    DropdownMenuItem(value: 'male', child: Text('Male')),
+                    DropdownMenuItem(value: 'other', child: Text('Other')),
+                  ],
+                  onChanged: (value) => setState(() => _gender = value ?? 'other'),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -118,6 +148,7 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
       if (widget.customer == null) {
         await ref.read(customersRepositoryProvider).createCustomer(
               fullName: _nameController.text.trim(),
+              gender: _gender,
               phoneNumber: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
               notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
             );
@@ -125,6 +156,7 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
         await ref.read(customersRepositoryProvider).updateCustomer(
               customerId: widget.customer!.id,
               fullName: _nameController.text.trim(),
+              gender: _gender,
               phoneNumber: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
               notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
             );
@@ -132,6 +164,25 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
       ref.invalidate(customersProvider);
       if (!mounted) return;
       Navigator.of(context).pop(true);
+    } on DuplicateCustomerException catch (e) {
+      if (!mounted) return;
+      if (widget.customer == null) {
+        final choice = await _showDuplicateDialog(context, e);
+        if (choice == _DuplicateChoice.openExisting && mounted) {
+          final customers = await ref.read(customersProvider.future);
+          final existing = customers.where((c) => c.id == e.existingCustomerId).firstOrNull;
+          if (existing != null) {
+            Navigator.of(context).pop();
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => CustomerDetailsScreen(customer: existing),
+              ),
+            );
+          }
+        }
+      } else {
+        await _showDuplicateEditDialog(context, e);
+      }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -177,4 +228,55 @@ class _AddCustomerScreenState extends ConsumerState<AddCustomerScreen> {
       pauseFor: const Duration(seconds: 4),
     );
   }
+
+  Future<_DuplicateChoice?> _showDuplicateDialog(
+    BuildContext context,
+    DuplicateCustomerException e,
+  ) async {
+    return showDialog<_DuplicateChoice>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Customer already exists'),
+        content: Text(
+          'You already have a customer named "${e.customerName}".\n\n'
+          'To add another person with a similar name, use a distinguishing detail '
+          'e.g. "Fatima Mohammed (daughter)" or "Musa - Ikeja".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_DuplicateChoice.cancel),
+            child: const Text('Change name'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(_DuplicateChoice.openExisting),
+            child: const Text('Open existing'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDuplicateEditDialog(
+    BuildContext context,
+    DuplicateCustomerException e,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Name already in use'),
+        content: Text(
+          'Another customer is already named "${e.customerName}".\n\n'
+          'Use a distinguishing detail in the name, e.g. "(daughter)" or "- Ikeja".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
+enum _DuplicateChoice { cancel, openExisting }

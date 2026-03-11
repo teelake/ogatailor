@@ -43,3 +43,5 @@ Offline-first customer measurement management for seamstresses, tailors, and fas
 - Phone numbers are not primary identifiers.
 - Sync model is API-driven (`push` and `pull`) with server-side conflict checks.
 - Auth model is guest-first (instant use), then upgrade to account for cloud features.
+- **Sync timing**: Local data syncs to server on app launch and every 5 minutes while the app is open.
+- **Measurements**: Gender-specific fields including Head/Cap (Fila), neck, shoulder, chest, waist, hip, sleeve, armhole, lengths, inseam, thigh, knee, plus female-specific bust, under bust, blouse/gown/skirt lengths.

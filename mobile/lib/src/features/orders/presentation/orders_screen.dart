@@ -232,8 +232,12 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                 controller: _amountController,
                 decoration: const InputDecoration(labelText: 'Amount (NGN)'),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                validator: (value) =>
-                    double.tryParse((value ?? '').trim()) == null ? 'Enter a valid amount' : null,
+                validator: (value) {
+                  final n = double.tryParse((value ?? '').trim());
+                  if (n == null) return 'Enter a valid amount';
+                  if (n < 0) return 'Amount cannot be negative';
+                  return null;
+                },
               ),
               const SizedBox(height: 10),
               TextFormField(

@@ -32,31 +32,52 @@ Base URL: `https://your-domain.com/api`
   - body:
     - `email`
     - `password`
+- `GET /api/auth/profile` (protected)
+- `PATCH /api/auth/profile` (protected)
+  - body:
+    - `full_name`
+    - `email`
+- `POST /api/auth/change-password` (protected)
+  - body:
+    - `current_password`
+    - `new_password`
+- `POST /api/auth/forgot-password`
+  - body:
+    - `email`
+- `POST /api/auth/reset-password`
+  - body:
+    - `email`
+    - `reset_code`
+    - `new_password`
 
 ## Customers
 
 - `POST /api/customers`
   - body:
-    - `owner_user_id` (string UUID)
-    - `full_name` (string)
+    - `full_name` (string) – stored with first letter of each word capitalized
+    - `gender` (`male|female|other`)
     - `phone_number` (string, optional)
-- `GET /api/customers?owner_user_id={uuid}`
+    - `notes` (string, optional)
+  - returns 409 if a customer with the same name exists (duplicates blocked):
+    - `error`: `"duplicate_name"`
+    - `message`: human-readable message
+    - `existing_customer_id`: UUID of the existing customer
+- `GET /api/customers`
 - `PATCH /api/customers`
   - body:
     - `customer_id`
-    - `owner_user_id`
-    - `full_name`
+    - `full_name` – stored with first letter of each word capitalized
+    - `gender`
     - `phone_number` (optional)
     - `notes` (optional)
+  - returns 409 if another customer has the same name (duplicates blocked)
 - `POST /api/customers/archive`
   - body:
     - `customer_id`
-    - `owner_user_id`
     - `archived` (boolean)
 - `DELETE /api/customers`
   - body:
     - `customer_id`
-    - `owner_user_id`
 
 ## Measurements
 

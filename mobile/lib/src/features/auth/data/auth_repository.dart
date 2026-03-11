@@ -96,6 +96,62 @@ class AuthRepository {
     return session;
   }
 
+  Future<Map<String, dynamic>> fetchProfile() async {
+    final response = await _dio.get('/api/auth/profile');
+    final data = Map<String, dynamic>.from(response.data as Map);
+    return Map<String, dynamic>.from((data['data'] ?? <String, dynamic>{}) as Map);
+  }
+
+  Future<void> updateProfile({
+    required String fullName,
+    required String email,
+  }) async {
+    await _dio.patch(
+      '/api/auth/profile',
+      data: {
+        'full_name': fullName,
+        'email': email,
+      },
+    );
+  }
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _dio.post(
+      '/api/auth/change-password',
+      data: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      },
+    );
+  }
+
+  Future<String> forgotPassword({required String email}) async {
+    final response = await _dio.post(
+      '/api/auth/forgot-password',
+      data: {'email': email},
+    );
+    final data = Map<String, dynamic>.from(response.data as Map);
+    return (data['reset_code'] ?? '').toString();
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String resetCode,
+    required String newPassword,
+  }) async {
+    await _dio.post(
+      '/api/auth/reset-password',
+      data: {
+        'email': email,
+        'reset_code': resetCode,
+        'new_password': newPassword,
+      },
+    );
+  }
+
   Future<void> _persistSession(AuthSession session) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kUserId, session.userId);

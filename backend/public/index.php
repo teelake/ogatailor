@@ -76,6 +76,12 @@ function validateRequired(array $data, array $required): ?string
     return null;
 }
 
+function normalizeCustomerName(string $name): string
+{
+    $name = trim(preg_replace('/\s+/', ' ', $name));
+    return ucwords(strtolower($name));
+}
+
 function bearerToken(): ?string
 {
     $raw = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
@@ -183,7 +189,9 @@ $isPublicRoute = ($method === 'GET' && ($path === '/' || routeMatches($path, '/h
     routeMatches($path, '/api/debug/request') ||
     routeMatches($path, '/api/auth/guest-start') ||
     routeMatches($path, '/api/auth/register') ||
-    routeMatches($path, '/api/auth/login');
+    routeMatches($path, '/api/auth/login') ||
+    routeMatches($path, '/api/auth/forgot-password') ||
+    routeMatches($path, '/api/auth/reset-password');
 
 $authUser = null;
 if (routeMatches($path, '/api/') && !$isPublicRoute) {
@@ -359,6 +367,174 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/login')) {
     return;
 }
 
+if ($method === 'GET' && routeMatches($path, '/api/auth/profile')) {
+    $userId = (string)($authUser['id'] ?? '');
+    $stmt = $pdo->prepare('SELECT id, full_name, email, is_guest, plan_code FROM users WHERE id = :id LIMIT 1');
+    $stmt->execute([':id' => $userId]);
+    $user = $stmt->fetch();
+    if (!$user) {
+        Response::json(['error' => 'user not found'], 404);
+        return;
+    }
+    Response::json(['data' => $user]);
+    return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/auth/profile')) {
+    $userId = (string)($authUser['id'] ?? '');
+    $data = requestBody();
+    $fullName = trim((string)($data['full_name'] ?? ''));
+    $email = strtolower(trim((string)($data['email'] ?? '')));
+    if ($fullName === '' || $email === '') {
+        Response::json(['error' => 'full_name and email are required'], 422);
+        return;
+    }
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        Response::json(['error' => 'email is invalid'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE users
+         SET full_name = :full_name, email = :email, updated_at = NOW()
+         WHERE id = :id'
+    );
+    $stmt->execute([
+        ':id' => $userId,
+        ':full_name' => $fullName,
+        ':email' => $email,
+    ]);
+    Response::json(['message' => 'Profile updated']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/auth/change-password')) {
+    $userId = (string)($authUser['id'] ?? '');
+    $data = requestBody();
+    $currentPassword = (string)($data['current_password'] ?? '');
+    $newPassword = (string)($data['new_password'] ?? '');
+
+    if ($currentPassword === '' || $newPassword === '') {
+        Response::json(['error' => 'current_password and new_password are required'], 422);
+        return;
+    }
+    if (strlen($newPassword) < 6) {
+        Response::json(['error' => 'new_password must be at least 6 characters'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare('SELECT password_hash FROM users WHERE id = :id LIMIT 1');
+    $stmt->execute([':id' => $userId]);
+    $row = $stmt->fetch();
+    if (!$row || !password_verify($currentPassword, (string)$row['password_hash'])) {
+        Response::json(['error' => 'current password is incorrect'], 401);
+        return;
+    }
+
+    $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $updateStmt = $pdo->prepare(
+        'UPDATE users SET password_hash = :password_hash, updated_at = NOW() WHERE id = :id'
+    );
+    $updateStmt->execute([
+        ':id' => $userId,
+        ':password_hash' => $newHash,
+    ]);
+
+    Response::json(['message' => 'Password changed successfully']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/auth/forgot-password')) {
+    $data = requestBody();
+    $email = strtolower(trim((string)($data['email'] ?? '')));
+    if ($email === '') {
+        Response::json(['error' => 'email is required'], 422);
+        return;
+    }
+
+    $userStmt = $pdo->prepare('SELECT id FROM users WHERE email = :email AND is_guest = 0 LIMIT 1');
+    $userStmt->execute([':email' => $email]);
+    $user = $userStmt->fetch();
+    if (!$user) {
+        Response::json(['error' => 'account not found'], 404);
+        return;
+    }
+
+    $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    $resetFile = dirname(__DIR__) . '/storage/logs/password-resets.json';
+    $resets = [];
+    if (is_file($resetFile)) {
+        $raw = file_get_contents($resetFile);
+        $decoded = $raw ? json_decode($raw, true) : null;
+        if (is_array($decoded)) {
+            $resets = $decoded;
+        }
+    }
+    $resets[$email] = [
+        'code_hash' => hash('sha256', $code),
+        'expires_at' => time() + 900,
+    ];
+    file_put_contents($resetFile, json_encode($resets, JSON_UNESCAPED_SLASHES));
+
+    Response::json([
+        'message' => 'Reset code generated',
+        'reset_code' => $code,
+        'note' => 'For MVP/testing. Replace with email delivery provider in production.',
+    ]);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/auth/reset-password')) {
+    $data = requestBody();
+    $email = strtolower(trim((string)($data['email'] ?? '')));
+    $code = trim((string)($data['reset_code'] ?? ''));
+    $newPassword = (string)($data['new_password'] ?? '');
+
+    if ($email === '' || $code === '' || $newPassword === '') {
+        Response::json(['error' => 'email, reset_code and new_password are required'], 422);
+        return;
+    }
+    if (strlen($newPassword) < 6) {
+        Response::json(['error' => 'new_password must be at least 6 characters'], 422);
+        return;
+    }
+
+    $resetFile = dirname(__DIR__) . '/storage/logs/password-resets.json';
+    $resets = [];
+    if (is_file($resetFile)) {
+        $raw = file_get_contents($resetFile);
+        $decoded = $raw ? json_decode($raw, true) : null;
+        if (is_array($decoded)) {
+            $resets = $decoded;
+        }
+    }
+
+    $entry = $resets[$email] ?? null;
+    if (!$entry || (int)($entry['expires_at'] ?? 0) < time()) {
+        Response::json(['error' => 'reset code is invalid or expired'], 422);
+        return;
+    }
+    if ((string)($entry['code_hash'] ?? '') !== hash('sha256', $code)) {
+        Response::json(['error' => 'reset code is invalid'], 422);
+        return;
+    }
+
+    $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $updateStmt = $pdo->prepare(
+        'UPDATE users SET password_hash = :password_hash, updated_at = NOW() WHERE email = :email'
+    );
+    $updateStmt->execute([
+        ':email' => $email,
+        ':password_hash' => $newHash,
+    ]);
+
+    unset($resets[$email]);
+    file_put_contents($resetFile, json_encode($resets, JSON_UNESCAPED_SLASHES));
+
+    Response::json(['message' => 'Password reset successful']);
+    return;
+}
+
 if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
     $ownerId = (string)($authUser['id'] ?? '');
 
@@ -387,12 +563,39 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = Uuid::v4();
     $ownerId = (string)($authUser['id'] ?? '');
-    $fullName = trim((string)($data['full_name'] ?? ''));
+    $fullName = normalizeCustomerName(trim((string)($data['full_name'] ?? '')));
+    $gender = strtolower(trim((string)($data['gender'] ?? '')));
     $phone = trim((string)($data['phone_number'] ?? ''));
     $notes = trim((string)($data['notes'] ?? ''));
 
-    if ($fullName === '') {
-        Response::json(['error' => 'full_name is required'], 422);
+    if ($fullName === '' || $gender === '') {
+        Response::json(['error' => 'full_name and gender are required'], 422);
+        return;
+    }
+    if (!in_array($gender, ['male', 'female', 'other'], true)) {
+        Response::json(['error' => 'gender must be male, female or other'], 422);
+        return;
+    }
+    if ($phone !== '' && (!ctype_digit($phone) || strlen($phone) > 11)) {
+        Response::json(['error' => 'phone_number must be numeric and max 11 digits'], 422);
+        return;
+    }
+
+    $checkStmt = $pdo->prepare(
+        'SELECT id FROM customers
+         WHERE owner_user_id = :owner_user_id
+         AND LOWER(TRIM(full_name)) = LOWER(TRIM(:full_name))
+         AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')
+         LIMIT 1'
+    );
+    $checkStmt->execute([':owner_user_id' => $ownerId, ':full_name' => $fullName]);
+    $existing = $checkStmt->fetch(\PDO::FETCH_ASSOC);
+    if ($existing) {
+        Response::json([
+            'error' => 'duplicate_name',
+            'message' => 'A customer with this name already exists.',
+            'existing_customer_id' => $existing['id'],
+        ], 409);
         return;
     }
 
@@ -409,14 +612,15 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO customers (id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at)
-         VALUES (:id, :owner_user_id, :full_name, :phone_number, :notes, NOW(), NOW(), NOW())'
+        'INSERT INTO customers (id, owner_user_id, full_name, phone_number, gender, notes, created_at, updated_at, last_modified_at)
+         VALUES (:id, :owner_user_id, :full_name, :phone_number, :gender, :notes, NOW(), NOW(), NOW())'
     );
     $stmt->execute([
         ':id' => $customerId,
         ':owner_user_id' => $ownerId,
         ':full_name' => $fullName,
         ':phone_number' => $phone !== '' ? $phone : null,
+        ':gender' => $gender,
         ':notes' => $notes !== '' ? $notes : null,
     ]);
 
@@ -429,6 +633,7 @@ if ($method === 'GET' && routeMatches($path, '/api/customers')) {
 
     $stmt = $pdo->prepare(
         'SELECT id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at
+         , gender
          FROM customers
          WHERE owner_user_id = :owner_user_id
          AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')
@@ -443,12 +648,44 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
     $data = requestBody();
     $customerId = trim((string)($data['customer_id'] ?? ''));
     $ownerId = (string)($authUser['id'] ?? '');
-    $fullName = trim((string)($data['full_name'] ?? ''));
+    $fullName = normalizeCustomerName(trim((string)($data['full_name'] ?? '')));
+    $gender = strtolower(trim((string)($data['gender'] ?? '')));
     $phone = trim((string)($data['phone_number'] ?? ''));
     $notes = trim((string)($data['notes'] ?? ''));
 
-    if ($customerId === '' || $fullName === '') {
-        Response::json(['error' => 'customer_id and full_name are required'], 422);
+    if ($customerId === '' || $fullName === '' || $gender === '') {
+        Response::json(['error' => 'customer_id, full_name and gender are required'], 422);
+        return;
+    }
+    if (!in_array($gender, ['male', 'female', 'other'], true)) {
+        Response::json(['error' => 'gender must be male, female or other'], 422);
+        return;
+    }
+    if ($phone !== '' && (!ctype_digit($phone) || strlen($phone) > 11)) {
+        Response::json(['error' => 'phone_number must be numeric and max 11 digits'], 422);
+        return;
+    }
+
+    $checkStmt = $pdo->prepare(
+        'SELECT id FROM customers
+         WHERE owner_user_id = :owner_user_id
+         AND id != :customer_id
+         AND LOWER(TRIM(full_name)) = LOWER(TRIM(:full_name))
+         AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')
+         LIMIT 1'
+    );
+    $checkStmt->execute([
+        ':owner_user_id' => $ownerId,
+        ':customer_id' => $customerId,
+        ':full_name' => $fullName,
+    ]);
+    $existing = $checkStmt->fetch(\PDO::FETCH_ASSOC);
+    if ($existing) {
+        Response::json([
+            'error' => 'duplicate_name',
+            'message' => 'Another customer with this name already exists.',
+            'existing_customer_id' => $existing['id'],
+        ], 409);
         return;
     }
 
@@ -456,6 +693,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
         'UPDATE customers
          SET full_name = :full_name,
              phone_number = :phone_number,
+             gender = :gender,
              notes = :notes,
              updated_at = NOW(),
              last_modified_at = NOW()
@@ -466,6 +704,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
         ':owner_user_id' => $ownerId,
         ':full_name' => $fullName,
         ':phone_number' => $phone !== '' ? $phone : null,
+        ':gender' => $gender,
         ':notes' => $notes !== '' ? $notes : null,
     ]);
 

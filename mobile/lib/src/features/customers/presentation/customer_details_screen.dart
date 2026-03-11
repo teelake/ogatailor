@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/phone_launcher.dart';
 import '../../auth/application/auth_controller.dart';
 import '../application/customers_controller.dart';
 import '../domain/customer.dart';
@@ -53,7 +55,10 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
         onPressed: () async {
           await Navigator.of(context).push<bool>(
             MaterialPageRoute(
-              builder: (_) => AddMeasurementScreen(customerId: _customer.id),
+              builder: (_) => AddMeasurementScreen(
+                customerId: _customer.id,
+                customerGender: _customer.gender,
+              ),
             ),
           );
           ref.invalidate(customerMeasurementsProvider(_customer.id));
@@ -74,7 +79,9 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
                   children: [
                     Text(_customer.fullName, style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 6),
-                    Text(_customer.phoneNumber ?? 'No phone number'),
+                    _TappablePhone(phoneNumber: _customer.phoneNumber),
+                    const SizedBox(height: 6),
+                    Text('Gender: ${_customer.gender.toUpperCase()}'),
                     if ((_customer.notes ?? '').isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(_customer.notes!),
@@ -113,8 +120,15 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
                                 Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
-                                  children: entry.payload.entries.map((item) {
-                                    return Chip(label: Text('${item.key}: ${item.value}'));
+                                  children: entry.payload.entries
+                                      .where((e) => e.key != 'notes' && e.key != 'unit')
+                                      .map((item) {
+                                    final unit = (entry.payload['unit'] ?? 'inches') as String;
+                                    final suffix = unit == 'cm' ? ' cm' : ' in';
+                                    final label = _formatKey(item.key);
+                                    return Chip(
+                                      label: Text('$label: ${item.value}$suffix'),
+                                    );
                                   }).toList(),
                                 ),
                               ],
@@ -135,11 +149,19 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
     );
   }
 
+  String _formatKey(String key) {
+    return key
+        .split('_')
+        .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+  }
+
   Future<void> _editMeasurement(MeasurementEntry entry) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AddMeasurementScreen(
           customerId: _customer.id,
+          customerGender: _customer.gender,
           measurement: entry,
         ),
       ),
@@ -204,5 +226,45 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
       if (!mounted) return;
       Navigator.of(context).pop();
     }
+  }
+}
+
+class _TappablePhone extends StatelessWidget {
+  const _TappablePhone({this.phoneNumber});
+
+  final String? phoneNumber;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasNumber = phoneNumber != null && phoneNumber!.trim().isNotEmpty;
+
+    if (!hasNumber) {
+      return const Text('No phone number');
+    }
+
+    return GestureDetector(
+      onTap: () async {
+        final launched = await launchPhoneCall(phoneNumber!);
+        if (!launched && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open phone dialer')),
+          );
+        }
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.phone_rounded, size: 18, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Text(
+            phoneNumber!,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.primary,
+                  decoration: TextDecoration.underline,
+                ),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/customer.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/phone_launcher.dart';
+import '../../domain/customer.dart';
 
 class CustomerTile extends StatelessWidget {
   const CustomerTile({
@@ -43,10 +44,7 @@ class CustomerTile extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      customer.phoneNumber ?? 'No phone number',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
+                    _PhoneText(phoneNumber: customer.phoneNumber),
                   ],
                 ),
               ),
@@ -54,6 +52,49 @@ class CustomerTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PhoneText extends StatelessWidget {
+  const _PhoneText({this.phoneNumber});
+
+  final String? phoneNumber;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasNumber = phoneNumber != null && phoneNumber!.trim().isNotEmpty;
+
+    if (!hasNumber) {
+      return Text(
+        'No phone number',
+        style: Theme.of(context).textTheme.bodyMedium,
+      );
+    }
+
+    return GestureDetector(
+      onTap: () async {
+        final launched = await launchPhoneCall(phoneNumber!);
+        if (!launched && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open phone dialer')),
+          );
+        }
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.phone_rounded, size: 14, color: AppColors.primary),
+          const SizedBox(width: 6),
+          Text(
+            phoneNumber!,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.primary,
+                  decoration: TextDecoration.underline,
+                ),
+          ),
+        ],
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/auth_controller.dart';
+import 'forgot_password_screen.dart';
 
 enum AuthSheetMode { login, register }
 
@@ -103,6 +104,18 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
             Text(
               '${authState.error}',
               style: const TextStyle(color: Colors.red),
+            ),
+          ],
+          if (!isRegister) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+                );
+              },
+              child: const Text('Forgot password?'),
             ),
           ],
         ],
