@@ -782,21 +782,31 @@ if ($method === 'GET' && routeMatches($path, '/api/customers')) {
     $offset = max(0, (int)($_GET['offset'] ?? 0));
     $query = trim((string)($_GET['q'] ?? ''));
     $startsWith = strtolower(trim((string)($_GET['starts_with'] ?? '')));
+    $archivedMode = strtolower(trim((string)($_GET['archived'] ?? 'exclude')));
     if ($startsWith !== '' && !preg_match('/^[a-z]$/', $startsWith)) {
         Response::json(['error' => 'starts_with must be one letter a-z'], 422);
+        return;
+    }
+    if (!in_array($archivedMode, ['exclude', 'only', 'all'], true)) {
+        Response::json(['error' => 'archived must be one of: exclude, only, all'], 422);
         return;
     }
 
     $countSql = 'SELECT COUNT(*)
                  FROM customers
-                 WHERE owner_user_id = :owner_user_id
-                   AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')';
+                 WHERE owner_user_id = :owner_user_id';
     $rowsSql = 'SELECT id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at
                 , gender
                 FROM customers
-                WHERE owner_user_id = :owner_user_id
-                  AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')';
+                WHERE owner_user_id = :owner_user_id';
     $params = [':owner_user_id' => $ownerId];
+    if ($archivedMode === 'exclude') {
+        $countSql .= ' AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')';
+        $rowsSql .= ' AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')';
+    } elseif ($archivedMode === 'only') {
+        $countSql .= ' AND notes LIKE \'[ARCHIVED]%\'';
+        $rowsSql .= ' AND notes LIKE \'[ARCHIVED]%\'';
+    }
     if ($query !== '') {
         $countSql .= ' AND (LOWER(full_name) LIKE :q OR phone_number LIKE :q)';
         $rowsSql .= ' AND (LOWER(full_name) LIKE :q OR phone_number LIKE :q)';

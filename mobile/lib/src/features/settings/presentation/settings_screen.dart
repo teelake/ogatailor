@@ -246,20 +246,33 @@ class _ThemeModeTile extends ConsumerWidget {
               segments: const [
                 ButtonSegment(
                   value: ThemeMode.system,
-                  label: Text('System'),
-                  icon: Icon(Icons.settings_suggest_rounded, size: 18),
+                  label: Text(
+                    'System',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 ButtonSegment(
                   value: ThemeMode.light,
-                  label: Text('Light'),
-                  icon: Icon(Icons.light_mode_rounded, size: 18),
+                  label: Text(
+                    'Light',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 ButtonSegment(
                   value: ThemeMode.dark,
-                  label: Text('Dark'),
-                  icon: Icon(Icons.dark_mode_rounded, size: 18),
+                  label: Text(
+                    'Dark',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
+              showSelectedIcon: false,
               selected: {themeMode},
               onSelectionChanged: (selected) async {
                 await ref.read(themeModeProvider.notifier).setThemeMode(selected.first);

@@ -14,6 +14,7 @@ class Customer {
   final String? phoneNumber;
   final String? notes;
   final DateTime? lastModifiedAt;
+  bool get isArchived => (notes ?? '').trim().startsWith('[ARCHIVED]');
 
   factory Customer.fromJson(Map<String, dynamic> json) {
     return Customer(

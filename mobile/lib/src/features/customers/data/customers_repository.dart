@@ -32,6 +32,7 @@ class CustomersRepository {
     required int offset,
     String? query,
     String? startsWith,
+    String archivedMode = 'exclude',
   }) async {
     try {
       final response = await _dio.get(
@@ -41,6 +42,7 @@ class CustomersRepository {
           'offset': offset,
           if ((query ?? '').trim().isNotEmpty) 'q': query!.trim(),
           if ((startsWith ?? '').trim().isNotEmpty) 'starts_with': startsWith!.trim().toLowerCase(),
+          if (archivedMode != 'exclude') 'archived': archivedMode,
         },
       );
       final data = Map<String, dynamic>.from(response.data as Map);
@@ -58,9 +60,17 @@ class CustomersRepository {
       final rows = await _offlineSync.readCache('cache_customers');
       final q = (query ?? '').trim().toLowerCase();
       final sw = (startsWith ?? '').trim().toLowerCase();
-      final filtered = q.isEmpty
+      final archived = archivedMode.trim().toLowerCase();
+      final archiveFiltered = archived == 'all'
           ? rows
-          : rows
+          : rows.where((r) {
+              final notes = ((r['notes'] ?? '')).toString().trim();
+              final isArchived = notes.startsWith('[ARCHIVED]');
+              return archived == 'only' ? isArchived : !isArchived;
+            }).toList();
+      final filtered = q.isEmpty
+          ? archiveFiltered
+          : archiveFiltered
               .where(
                 (r) =>
                     ((r['full_name'] ?? '').toString().toLowerCase().contains(q)) ||

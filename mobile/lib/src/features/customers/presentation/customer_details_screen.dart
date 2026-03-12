@@ -44,10 +44,13 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) => _onMenuAction(value, session != null),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit customer')),
-              PopupMenuItem(value: 'archive', child: Text('Archive customer')),
-              PopupMenuItem(value: 'delete', child: Text('Delete customer')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'edit', child: Text('Edit customer')),
+              PopupMenuItem(
+                value: 'archive',
+                child: Text(_customer.isArchived ? 'Unarchive customer' : 'Archive customer'),
+              ),
+              const PopupMenuItem(value: 'delete', child: Text('Delete customer')),
             ],
           ),
         ],
@@ -239,12 +242,23 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
     }
 
     if (action == 'archive') {
+      final willArchive = !_customer.isArchived;
       await ref.read(customersRepositoryProvider).archiveCustomer(
             customerId: _customer.id,
-            archived: true,
+            archived: willArchive,
           );
       ref.invalidate(customersProvider);
       if (!mounted) return;
+      final refreshed = await ref.read(customersProvider.future);
+      final match = refreshed.where((item) => item.id == _customer.id);
+      if (match.isNotEmpty) {
+        setState(() => _customer = match.first);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(willArchive ? 'Customer archived' : 'Customer unarchived'),
+        ),
+      );
       Navigator.of(context).pop();
       return;
     }

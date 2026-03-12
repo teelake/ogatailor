@@ -23,18 +23,26 @@ class OrdersRepository {
       final rows = List<Map<String, dynamic>>.from(data['data'] as List<dynamic>);
       await _offlineSync.saveCache('cache_orders', rows);
       final orders = rows.map(OrderEntry.fromJson).toList();
-      await _reminders.syncAll(
-        orders,
-        hasPremiumAccess: hasPremiumAccess,
-      );
+      try {
+        await _reminders.syncAll(
+          orders,
+          hasPremiumAccess: hasPremiumAccess,
+        );
+      } catch (_) {
+        // Notifications must not break Orders screen.
+      }
       return orders;
     } catch (_) {
       final rows = await _offlineSync.readCache('cache_orders');
       final orders = rows.map(OrderEntry.fromJson).toList();
-      await _reminders.syncAll(
-        orders,
-        hasPremiumAccess: hasPremiumAccess,
-      );
+      try {
+        await _reminders.syncAll(
+          orders,
+          hasPremiumAccess: hasPremiumAccess,
+        );
+      } catch (_) {
+        // Notifications must not break Orders screen.
+      }
       return orders;
     }
   }
@@ -61,19 +69,23 @@ class OrdersRepository {
       final orderId = (data['id'] ?? '').toString();
       if (orderId.isNotEmpty) {
         final hasPremiumAccess = await _fetchHasPremiumAccess();
-        await _reminders.scheduleForOrder(
-          OrderEntry(
-            id: orderId,
-            customerId: customerId,
-            customerName: 'Customer',
-            title: title,
-            status: status,
-            amountTotal: amountTotal,
-            dueDate: dueDate,
-            notes: notes,
-          ),
-          hasPremiumAccess: hasPremiumAccess,
-        );
+        try {
+          await _reminders.scheduleForOrder(
+            OrderEntry(
+              id: orderId,
+              customerId: customerId,
+              customerName: 'Customer',
+              title: title,
+              status: status,
+              amountTotal: amountTotal,
+              dueDate: dueDate,
+              notes: notes,
+            ),
+            hasPremiumAccess: hasPremiumAccess,
+          );
+        } catch (_) {
+          // Non-blocking: order save succeeded even if reminder scheduling fails.
+        }
       }
       await _offlineSync.processQueue();
       return false;

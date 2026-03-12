@@ -34,6 +34,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   String? _error;
   List<Customer> _items = const [];
   String _alphaFilter = 'all';
+  String _archiveFilter = 'active';
 
   @override
   void initState() {
@@ -82,6 +83,27 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             const SizedBox(height: 10),
             _SyncStatusBanner(syncStatusAsync: syncStatusAsync),
             const SizedBox(height: 10),
+            SizedBox(
+              height: 38,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _customerFilterOptions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (_, index) {
+                  final option = _customerFilterOptions[index];
+                  final selected = option == _archiveFilter;
+                  return ChoiceChip(
+                    label: Text(option == 'active' ? 'ACTIVE' : option == 'archived' ? 'ARCHIVED' : 'ALL'),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() => _archiveFilter = option);
+                      _reload();
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               height: 38,
               child: ListView.separated(
@@ -204,6 +226,11 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     try {
       final query = _query.trim().toLowerCase();
       final startsWith = _alphaFilter == 'all' ? '' : _alphaFilter.toLowerCase();
+      final archivedMode = _archiveFilter == 'active'
+          ? 'exclude'
+          : _archiveFilter == 'archived'
+              ? 'only'
+              : 'all';
       final useLocalFilteredMode = query.isNotEmpty || startsWith.isNotEmpty;
 
       if (useLocalFilteredMode) {
@@ -211,9 +238,14 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         final filtered = all.where((customer) {
           final name = customer.fullName.toLowerCase();
           final phone = (customer.phoneNumber ?? '').toLowerCase();
+          final matchesArchive = archivedMode == 'all'
+              ? true
+              : archivedMode == 'only'
+                  ? customer.isArchived
+                  : !customer.isArchived;
           final matchesQuery = query.isEmpty || name.contains(query) || phone.contains(query);
           final matchesAlpha = startsWith.isEmpty || name.startsWith(startsWith);
-          return matchesQuery && matchesAlpha;
+          return matchesArchive && matchesQuery && matchesAlpha;
         }).toList();
 
         if (!mounted) return;
@@ -229,6 +261,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       final page = await ref.read(customersRepositoryProvider).listCustomersPage(
             limit: _pageSize,
             offset: 0,
+            archivedMode: archivedMode,
           );
       if (!mounted) return;
       setState(() {
@@ -251,7 +284,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   }
 
   Future<void> _loadMore() async {
-    if (_query.trim().isNotEmpty || _alphaFilter != 'all') return;
+    if (_query.trim().isNotEmpty || _alphaFilter != 'all' || _archiveFilter != 'active') return;
     if (_loadingMore || !_hasMore) return;
     setState(() => _loadingMore = true);
     try {
@@ -260,6 +293,11 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             offset: _offset,
             query: _query.trim(),
             startsWith: _alphaFilter == 'all' ? null : _alphaFilter,
+            archivedMode: _archiveFilter == 'active'
+                ? 'exclude'
+                : _archiveFilter == 'archived'
+                    ? 'only'
+                    : 'all',
           );
       if (!mounted) return;
       setState(() {
@@ -302,6 +340,12 @@ const _alphaOptions = [
   'x',
   'y',
   'z',
+];
+
+const _customerFilterOptions = [
+  'active',
+  'archived',
+  'all',
 ];
 
 class _PlanBadge extends StatelessWidget {
