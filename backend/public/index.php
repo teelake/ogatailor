@@ -52,7 +52,7 @@ function issueAuthToken(\PDO $pdo, string $userId): string
 {
     $plainToken = bin2hex(random_bytes(32));
     $tokenHash = hash('sha256', $plainToken);
-    $ttlDays = max(1, (int)\App\Config\Env::get('AUTH_TOKEN_TTL_DAYS', 30));
+    $ttlDays = max(1, \App\Config\Env::getInt('AUTH_TOKEN_TTL_DAYS', 30));
     $expiresAt = (new \DateTimeImmutable('now'))
         ->modify('+' . $ttlDays . ' days')
         ->format('Y-m-d H:i:s');

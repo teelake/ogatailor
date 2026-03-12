@@ -14,12 +14,12 @@ final class Connection
     public static function make(): PDO
     {
         $host = Env::get('DB_HOST', '127.0.0.1');
-        $port = Env::get('DB_PORT', '3306');
+        $port = Env::getInt('DB_PORT', 3306);
         $dbName = Env::get('DB_NAME', 'oga_tailor');
         $user = Env::get('DB_USER', 'root');
         $pass = Env::get('DB_PASS', '');
 
-        $dsn = sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $host, $port, $dbName);
+        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $dbName);
 
         try {
             return new PDO($dsn, $user, $pass, [
