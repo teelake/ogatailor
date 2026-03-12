@@ -23,6 +23,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   bool _sending = false;
   bool _resetting = false;
   String _debugCode = '';
+  bool _hideNewPassword = true;
 
   @override
   void dispose() {
@@ -111,10 +112,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: _newPasswordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
+                    obscureText: _hideNewPassword,
+                    decoration: InputDecoration(
                       labelText: 'New password',
                       hintText: 'Min $_minPasswordLength characters',
+                      suffixIcon: IconButton(
+                        onPressed: () => setState(() => _hideNewPassword = !_hideNewPassword),
+                        icon: Icon(
+                          _hideNewPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                        ),
+                      ),
                     ),
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'New password is required';

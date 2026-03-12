@@ -311,7 +311,7 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                       }
                       setState(() => _saving = true);
                       try {
-                        await ref.read(ordersRepositoryProvider).createOrder(
+                        final queuedOffline = await ref.read(ordersRepositoryProvider).createOrder(
                               customerId: _selectedCustomerId!,
                               title: _titleController.text.trim(),
                               status: 'pending',
@@ -322,6 +322,15 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                               dueDate: _selectedDueDate,
                             );
                         if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              queuedOffline
+                                  ? 'Saved offline. It will sync when internet is back.'
+                                  : 'Order created successfully.',
+                            ),
+                          ),
+                        );
                         Navigator.of(context).pop();
                       } catch (error) {
                         if (!mounted) return;

@@ -202,11 +202,33 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       _offset = 0;
     });
     try {
+      final query = _query.trim().toLowerCase();
+      final startsWith = _alphaFilter == 'all' ? '' : _alphaFilter.toLowerCase();
+      final useLocalFilteredMode = query.isNotEmpty || startsWith.isNotEmpty;
+
+      if (useLocalFilteredMode) {
+        final all = await ref.read(customersRepositoryProvider).listCustomers();
+        final filtered = all.where((customer) {
+          final name = customer.fullName.toLowerCase();
+          final phone = (customer.phoneNumber ?? '').toLowerCase();
+          final matchesQuery = query.isEmpty || name.contains(query) || phone.contains(query);
+          final matchesAlpha = startsWith.isEmpty || name.startsWith(startsWith);
+          return matchesQuery && matchesAlpha;
+        }).toList();
+
+        if (!mounted) return;
+        setState(() {
+          _items = filtered;
+          _total = filtered.length;
+          _hasMore = false;
+          _offset = filtered.length;
+        });
+        return;
+      }
+
       final page = await ref.read(customersRepositoryProvider).listCustomersPage(
             limit: _pageSize,
             offset: 0,
-            query: _query.trim(),
-            startsWith: _alphaFilter == 'all' ? null : _alphaFilter,
           );
       if (!mounted) return;
       setState(() {
@@ -229,6 +251,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   }
 
   Future<void> _loadMore() async {
+    if (_query.trim().isNotEmpty || _alphaFilter != 'all') return;
     if (_loadingMore || !_hasMore) return;
     setState(() => _loadingMore = true);
     try {

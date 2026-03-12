@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../core/notifications/order_reminder_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/sync/offline_sync_service.dart';
+import '../../../core/utils/error_message.dart';
 import '../domain/order_entry.dart';
 
 class OrdersRepository {
@@ -38,7 +39,7 @@ class OrdersRepository {
     }
   }
 
-  Future<void> createOrder({
+  Future<bool> createOrder({
     required String customerId,
     required String title,
     required String status,
@@ -75,8 +76,13 @@ class OrdersRepository {
         );
       }
       await _offlineSync.processQueue();
-    } catch (_) {
-      await _offlineSync.enqueue(method: 'POST', path: '/api/orders', data: body);
+      return false;
+    } on DioException catch (error) {
+      if (isConnectivityIssue(error)) {
+        await _offlineSync.enqueue(method: 'POST', path: '/api/orders', data: body);
+        return true;
+      }
+      rethrow;
     }
   }
 
@@ -98,8 +104,12 @@ class OrdersRepository {
         await _refreshRemindersFromServer();
       }
       await _offlineSync.processQueue();
-    } catch (_) {
-      await _offlineSync.enqueue(method: 'PATCH', path: '/api/orders/status', data: body);
+    } on DioException catch (error) {
+      if (isConnectivityIssue(error)) {
+        await _offlineSync.enqueue(method: 'PATCH', path: '/api/orders/status', data: body);
+        return;
+      }
+      rethrow;
     }
   }
 
@@ -117,8 +127,12 @@ class OrdersRepository {
       await _dio.patch('/api/orders/due-date', data: body);
       await _refreshRemindersFromServer();
       await _offlineSync.processQueue();
-    } catch (_) {
-      await _offlineSync.enqueue(method: 'PATCH', path: '/api/orders/due-date', data: body);
+    } on DioException catch (error) {
+      if (isConnectivityIssue(error)) {
+        await _offlineSync.enqueue(method: 'PATCH', path: '/api/orders/due-date', data: body);
+        return;
+      }
+      rethrow;
     }
   }
 

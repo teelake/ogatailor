@@ -31,6 +31,8 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  bool _hidePassword = true;
+  bool _hideConfirmPassword = true;
 
   @override
   void dispose() {
@@ -107,8 +109,16 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
             const SizedBox(height: 10),
             TextFormField(
               controller: _passwordController,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                suffixIcon: IconButton(
+                  onPressed: () => setState(() => _hidePassword = !_hidePassword),
+                  icon: Icon(
+                    _hidePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  ),
+                ),
+              ),
+              obscureText: _hidePassword,
               validator: (v) {
                 final value = v ?? '';
                 if (value.isEmpty) return 'Password is required';
@@ -120,8 +130,16 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
               const SizedBox(height: 10),
               TextFormField(
                 controller: _confirmPasswordController,
-                decoration: const InputDecoration(labelText: 'Confirm password'),
-                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Confirm password',
+                  suffixIcon: IconButton(
+                    onPressed: () => setState(() => _hideConfirmPassword = !_hideConfirmPassword),
+                    icon: Icon(
+                      _hideConfirmPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                    ),
+                  ),
+                ),
+                obscureText: _hideConfirmPassword,
                 validator: (v) {
                   if ((v ?? '').isEmpty) return 'Please confirm password';
                   if (v != _passwordController.text) return 'Passwords do not match';
