@@ -4,7 +4,7 @@ VALUES (
     'Demo Tailor',
     'demo@ogatailor.app',
     '$2y$10$hR8c03fLA6Q.bjM2qf86n.L0EJAMrLf6blW4yqAhrYYg9jY3qp6mS',
-    'free',
+    'starter',
     NULL,
     NOW(),
     NOW()

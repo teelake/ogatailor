@@ -2,6 +2,31 @@ import 'package:dio/dio.dart';
 
 String userFriendlyError(Object error, {String fallback = 'Something went wrong. Please try again.'}) {
   if (error is DioException) {
+    final statusCode = error.response?.statusCode;
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout) {
+      return 'Request timed out. Please check your internet and try again.';
+    }
+    if (error.type == DioExceptionType.connectionError) {
+      return 'Could not connect to server. Check your internet connection and try again.';
+    }
+    if (statusCode == 401) {
+      return 'Invalid email or password. Please try again.';
+    }
+    if (statusCode == 403) {
+      return 'You do not have access to perform this action.';
+    }
+    if (statusCode == 404) {
+      return 'Requested resource was not found.';
+    }
+    if (statusCode == 429) {
+      return 'Too many requests. Please wait a moment and try again.';
+    }
+    if (statusCode != null && statusCode >= 500) {
+      return 'Server is currently unavailable. Please try again shortly.';
+    }
+
     final data = error.response?.data;
     if (data is Map) {
       final message = (data['message'] ?? data['error'] ?? '').toString().trim();
@@ -17,6 +42,16 @@ String userFriendlyError(Object error, {String fallback = 'Something went wrong.
     return _normalizeMessage(raw.replaceFirst('Exception:', '').trim());
   }
   return _normalizeMessage(raw);
+}
+
+bool isConnectivityIssue(Object error) {
+  if (error is DioException) {
+    return error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.connectionError;
+  }
+  return false;
 }
 
 String _normalizeMessage(String message) {

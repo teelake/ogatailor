@@ -84,17 +84,17 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       keyboardType: TextInputType.phone,
                       maxLength: 11,
                       decoration: const InputDecoration(
-                        labelText: 'Phone number (optional)',
+                        labelText: 'Phone number',
                         hintText: 'e.g. 08012345678',
                       ),
                       validator: (v) {
                         final value = (v ?? '').trim();
-                        if (value.isEmpty) return null;
+                        if (value.isEmpty) return 'Phone number is required';
                         if (!RegExp(r'^\d+$').hasMatch(value)) {
                           return 'Phone must be numeric only';
                         }
-                        if (value.length > 11) {
-                          return 'Phone must be max 11 digits';
+                        if (value.length != 11) {
+                          return 'Phone must be exactly 11 digits';
                         }
                         return null;
                       },
@@ -110,9 +110,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               await ref.read(authRepositoryProvider).updateProfile(
                                     fullName: _fullNameController.text.trim(),
                                     email: _emailController.text.trim(),
-                                    phoneNumber: _phoneController.text.trim().isEmpty
-                                        ? null
-                                        : _phoneController.text.trim(),
+                                    phoneNumber: _phoneController.text.trim(),
                                   );
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(

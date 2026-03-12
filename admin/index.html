@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Oga Tailor Admin</title>
+  <link rel="stylesheet" href="/oga-tailor/admin/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="card auth">
+      <h1>Oga Tailor Admin</h1>
+      <p>Enter your API token to load your dashboard.</p>
+      <input id="token" type="password" placeholder="Bearer token" />
+      <button id="loadBtn">Load Dashboard</button>
+      <p id="authMsg" class="muted"></p>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="topbar">
+        <h2>Business Overview</h2>
+        <label class="inline">
+          Upcoming rows
+          <select id="upcomingLimit">
+            <option value="8">8</option>
+            <option value="12">12</option>
+            <option value="20">20</option>
+          </select>
+        </label>
+      </div>
+      <div class="stats">
+        <article class="card stat"><h3>Plan</h3><p id="planVal">-</p></article>
+        <article class="card stat"><h3>Customers</h3><p id="customersVal">0</p></article>
+        <article class="card stat"><h3>Measurements</h3><p id="measurementsVal">0</p></article>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <h3>Order Status Breakdown</h3>
+          <ul id="statuses"></ul>
+          <div id="statusBars" class="bars"></div>
+        </article>
+        <article class="card">
+          <h3>Upcoming Due Orders</h3>
+          <ul id="upcoming"></ul>
+        </article>
+      </div>
+
+      <div class="topbar">
+        <h2>Plan Configuration</h2>
+      </div>
+      <div id="plansGrid" class="grid"></div>
+    </section>
+  </main>
+  <script src="/oga-tailor/admin/app.js"></script>
+</body>
+</html>

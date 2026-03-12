@@ -24,6 +24,7 @@ Base URL: `https://your-domain.com/api`
 - `POST /api/auth/register`
   - body:
     - `full_name` (string, required)
+    - `phone_number` (string, required, numeric, exactly 11 digits)
     - `email` (string, required)
     - `password` (string, required)
     - `guest_user_id` (string UUID, optional for guest upgrade)
@@ -37,10 +38,15 @@ Base URL: `https://your-domain.com/api`
   - body:
     - `full_name`
     - `email`
+    - `phone_number` (required, numeric, exactly 11 digits)
 - `POST /api/auth/change-password` (protected)
   - body:
     - `current_password`
     - `new_password`
+- `POST /api/auth/logout` (protected)
+  - revokes current bearer token session
+- `POST /api/auth/logout-all` (protected)
+  - revokes all sessions for the current account
 - `POST /api/auth/forgot-password`
   - body:
     - `email`
@@ -63,6 +69,16 @@ Base URL: `https://your-domain.com/api`
     - `message`: human-readable message
     - `existing_customer_id`: UUID of the existing customer
 - `GET /api/customers`
+  - query params (optional):
+    - `limit` (default 50, max 200)
+    - `offset` (default 0)
+    - `q` (search by name/phone)
+    - `starts_with` (single letter `a-z`, filters by customer name prefix)
+  - response includes:
+    - `meta.total`
+    - `meta.limit`
+    - `meta.offset`
+    - `meta.has_more`
 - `PATCH /api/customers`
   - body:
     - `customer_id`
@@ -70,6 +86,7 @@ Base URL: `https://your-domain.com/api`
     - `gender`
     - `phone_number` (optional)
     - `notes` (optional)
+    - `client_last_modified_at` (optional; ISO datetime for conflict detection)
   - returns 409 if another customer has the same name (duplicates blocked)
 - `POST /api/customers/archive`
   - body:
@@ -92,29 +109,29 @@ Base URL: `https://your-domain.com/api`
     - `measurement_id`
     - `taken_at`
     - `payload` (object)
+    - `client_last_modified_at` (optional; ISO datetime for conflict detection)
 
 ## Orders (Phase 2.2)
 
 - `POST /api/orders`
   - body:
-    - `owner_user_id`
     - `customer_id`
     - `title`
     - `status` (`pending|in_progress|ready|delivered|cancelled`)
     - `amount_total`
     - `due_date` (optional)
     - `notes` (optional)
-- `GET /api/orders?owner_user_id={uuid}`
+- `GET /api/orders`
 - `PATCH /api/orders/status`
   - body:
-    - `owner_user_id`
     - `order_id`
     - `status`
+    - `client_last_modified_at` (optional; ISO datetime for conflict detection)
 - `PATCH /api/orders/due-date`
   - body:
-    - `owner_user_id`
     - `order_id`
     - `due_date` (nullable)
+    - `client_last_modified_at` (optional; ISO datetime for conflict detection)
 
 ## Plan Summary
 
@@ -123,7 +140,24 @@ Base URL: `https://your-domain.com/api`
 ## Diagnostics and Export
 
 - `GET /api/diagnostics` (protected)
-- `GET /api/export/measurements` (paid only)
+- `GET /api/export/measurements` (Growth/Pro only)
+  - query params (all optional):
+    - `customer_id`
+    - `start_date` (`YYYY-MM-DD`)
+    - `end_date` (`YYYY-MM-DD`)
+- `GET /api/admin/dashboard` (protected)
+  - query params:
+    - `upcoming_limit` (optional, 1-30, default 8)
+- `GET /api/admin/plans` (protected)
+  - returns current plan feature configuration
+- `PATCH /api/admin/plans` (protected)
+  - body:
+    - `plan_code` (`starter|growth|pro`, required)
+    - `customer_limit` (int or null)
+    - `can_sync` (bool)
+    - `can_export` (bool)
+    - `can_multi_device` (bool)
+    - `can_advanced_reminders` (bool)
 
 ## Sync (Draft)
 
@@ -131,7 +165,7 @@ Base URL: `https://your-domain.com/api`
   - uploads pending offline changes from device queue
 - `GET /api/sync/pull?user_id={uuid}&since={cursor}`
   - pulls changed entities since cursor
-  - paid plan only
+  - Growth/Pro plan only
 
 ## Upcoming Endpoints (Phase 2+)
 
@@ -150,10 +184,13 @@ Base URL: `https://your-domain.com/api`
 
 ## Plan Rules
 
-- Free plan:
-  - max 100 customers
+- Starter (free):
+  - max 50 customers
   - no cloud backup or multi-device sync
   - guest mode allowed (offline-first onboarding)
-- Paid plan:
+- Growth:
+  - max 500 customers
+  - cloud backup + restore + export
+- Pro:
   - unlimited customers
   - cloud backup + restore + multi-device + export

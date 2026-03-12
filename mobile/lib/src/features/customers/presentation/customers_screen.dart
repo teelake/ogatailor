@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/sync/offline_sync_service.dart';
+import '../../../core/utils/error_message.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/domain/plan_summary.dart';
 import '../application/customers_controller.dart';
@@ -216,7 +217,12 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = error.toString());
+      setState(() {
+        _error = userFriendlyError(
+          error,
+          fallback: 'Could not load customers. Please try again.',
+        );
+      });
     } finally {
       if (mounted) setState(() => _loadingInitial = false);
     }

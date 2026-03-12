@@ -2,10 +2,11 @@ CREATE TABLE IF NOT EXISTS users (
     id CHAR(36) PRIMARY KEY,
     full_name VARCHAR(120) NOT NULL,
     email VARCHAR(160) NULL UNIQUE,
+    phone_number VARCHAR(20) NULL,
     password_hash VARCHAR(255) NULL,
     is_guest TINYINT(1) NOT NULL DEFAULT 0,
     guest_device_id VARCHAR(120) NULL UNIQUE,
-    plan_code ENUM('free', 'paid') NOT NULL DEFAULT 'free',
+    plan_code ENUM('starter', 'growth', 'pro') NOT NULL DEFAULT 'starter',
     plan_expires_at DATETIME NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
@@ -21,6 +22,30 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     UNIQUE KEY uniq_auth_tokens_hash (token_hash),
     KEY idx_auth_tokens_user (user_id)
 );
+
+CREATE TABLE IF NOT EXISTS plan_settings (
+    plan_code ENUM('starter', 'growth', 'pro') PRIMARY KEY,
+    customer_limit INT NULL,
+    can_sync TINYINT(1) NOT NULL DEFAULT 0,
+    can_export TINYINT(1) NOT NULL DEFAULT 0,
+    can_multi_device TINYINT(1) NOT NULL DEFAULT 0,
+    can_advanced_reminders TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+
+INSERT INTO plan_settings (plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, created_at, updated_at)
+VALUES
+  ('starter', 50, 0, 0, 0, 0, NOW(), NOW()),
+  ('growth', 500, 1, 1, 0, 1, NOW(), NOW()),
+  ('pro', NULL, 1, 1, 1, 1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  customer_limit = VALUES(customer_limit),
+  can_sync = VALUES(can_sync),
+  can_export = VALUES(can_export),
+  can_multi_device = VALUES(can_multi_device),
+  can_advanced_reminders = VALUES(can_advanced_reminders),
+  updated_at = VALUES(updated_at);
 
 CREATE TABLE IF NOT EXISTS customers (
     id CHAR(36) PRIMARY KEY,

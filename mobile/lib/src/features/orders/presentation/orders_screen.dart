@@ -104,7 +104,14 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => Center(child: Text('Could not load orders: $error')),
+                error: (error, _) => Center(
+                  child: Text(
+                    userFriendlyError(
+                      error,
+                      fallback: 'Could not load orders. Please try again.',
+                    ),
+                  ),
+                ),
               ),
             ),
           ],

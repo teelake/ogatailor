@@ -76,16 +76,16 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
               TextFormField(
                 controller: _phoneController,
                 decoration: const InputDecoration(
-                  labelText: 'Phone number (optional)',
+                  labelText: 'Phone number',
                   hintText: 'e.g. 08012345678',
                 ),
                 keyboardType: TextInputType.phone,
                 maxLength: 11,
                 validator: (v) {
                   final value = (v ?? '').trim();
-                  if (value.isEmpty) return null;
+                  if (value.isEmpty) return 'Phone number is required';
                   if (!RegExp(r'^\d+$').hasMatch(value)) return 'Phone must be numeric only';
-                  if (value.length > 11) return 'Phone must be max 11 digits';
+                  if (value.length != 11) return 'Phone must be exactly 11 digits';
                   return null;
                 },
               ),
@@ -133,40 +133,44 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
             ElevatedButton(
               onPressed: loading
                   ? null
-                  : () async {
-                      if (!_formKey.currentState!.validate()) return;
-                      if (isRegister) {
-                        await ref.read(authControllerProvider.notifier).register(
-                              fullName: _fullNameController.text.trim(),
-                              phoneNumber: _phoneController.text.trim().isEmpty
-                                  ? null
-                                  : _phoneController.text.trim(),
-                              email: _emailController.text.trim(),
-                              password: _passwordController.text,
-                            );
-                      } else {
-                        await ref.read(authControllerProvider.notifier).login(
-                              email: _emailController.text.trim(),
-                              password: _passwordController.text,
-                            );
-                      }
-
-                      final latest = ref.read(authControllerProvider);
-                      if (!latest.hasError && context.mounted) {
-                        Navigator.of(context).pop();
-                      }
-                    },
+                  : () => _submit(isRegister: isRegister),
               child: Text(isRegister ? 'Create Account' : 'Sign In'),
             ),
             if (authState.hasError) ...[
               const SizedBox(height: 10),
-              Text(
-                userFriendlyError(
-                  authState.error ?? Exception('Authentication failed'),
-                  fallback: 'Authentication failed. Please check your details and try again.',
+              if (isConnectivityIssue(authState.error ?? Exception('Authentication failed')))
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'No internet connection.',
+                        style: TextStyle(fontWeight: FontWeight.w600, color: Colors.orange),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text('Please turn on mobile data or Wi-Fi, then try again.'),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: loading ? null : () => _submit(isRegister: isRegister),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
                 ),
-                style: const TextStyle(color: Colors.red),
-              ),
+              if (!isConnectivityIssue(authState.error ?? Exception('Authentication failed')))
+                Text(
+                  userFriendlyError(
+                    authState.error ?? Exception('Authentication failed'),
+                    fallback: 'Authentication failed. Please check your details and try again.',
+                  ),
+                  style: const TextStyle(color: Colors.red),
+                ),
             ],
             if (!isRegister) ...[
               const SizedBox(height: 8),
@@ -184,5 +188,27 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
         ),
       ),
     );
+  }
+
+  Future<void> _submit({required bool isRegister}) async {
+    if (!_formKey.currentState!.validate()) return;
+    if (isRegister) {
+      await ref.read(authControllerProvider.notifier).register(
+            fullName: _fullNameController.text.trim(),
+            phoneNumber: _phoneController.text.trim(),
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          );
+    } else {
+      await ref.read(authControllerProvider.notifier).login(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          );
+    }
+
+    final latest = ref.read(authControllerProvider);
+    if (!latest.hasError && context.mounted) {
+      Navigator.of(context).pop();
+    }
   }
 }

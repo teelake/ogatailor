@@ -52,14 +52,19 @@ function issueAuthToken(\PDO $pdo, string $userId): string
 {
     $plainToken = bin2hex(random_bytes(32));
     $tokenHash = hash('sha256', $plainToken);
+    $ttlDays = max(1, (int)\App\Config\Env::get('AUTH_TOKEN_TTL_DAYS', 30));
+    $expiresAt = (new \DateTimeImmutable('now'))
+        ->modify('+' . $ttlDays . ' days')
+        ->format('Y-m-d H:i:s');
 
     $stmt = $pdo->prepare(
         'INSERT INTO auth_tokens (user_id, token_hash, expires_at, created_at)
-         VALUES (:user_id, :token_hash, NULL, NOW())'
+         VALUES (:user_id, :token_hash, :expires_at, NOW())'
     );
     $stmt->execute([
         ':user_id' => $userId,
         ':token_hash' => $tokenHash,
+        ':expires_at' => $expiresAt,
     ]);
 
     return $plainToken;
@@ -104,6 +109,7 @@ function authenticatedUser(\PDO $pdo): ?array
          FROM auth_tokens t
          INNER JOIN users u ON u.id = t.user_id
          WHERE t.token_hash = :token_hash
+           AND (t.expires_at IS NULL OR t.expires_at > NOW())
          LIMIT 1'
     );
     $stmt->execute([':token_hash' => $tokenHash]);
@@ -111,9 +117,100 @@ function authenticatedUser(\PDO $pdo): ?array
     return $user ?: null;
 }
 
-function requirePaid(array $authUser): bool
+function planSettingDefaults(string $planCode): array
 {
-    return ($authUser['plan_code'] ?? 'free') === 'paid';
+    $plan = strtolower(trim($planCode));
+    if ($plan === 'growth') {
+        return [
+            'plan_code' => 'growth',
+            'customer_limit' => 500,
+            'can_sync' => 1,
+            'can_export' => 1,
+            'can_multi_device' => 0,
+            'can_advanced_reminders' => 1,
+        ];
+    }
+    if ($plan === 'pro') {
+        return [
+            'plan_code' => 'pro',
+            'customer_limit' => null,
+            'can_sync' => 1,
+            'can_export' => 1,
+            'can_multi_device' => 1,
+            'can_advanced_reminders' => 1,
+        ];
+    }
+
+    return [
+        'plan_code' => 'starter',
+        'customer_limit' => 50,
+        'can_sync' => 0,
+        'can_export' => 0,
+        'can_multi_device' => 0,
+        'can_advanced_reminders' => 0,
+    ];
+}
+
+function planSettings(\PDO $pdo, string $planCode): array
+{
+    $normalized = strtolower(trim($planCode));
+    if (!in_array($normalized, ['starter', 'growth', 'pro'], true)) {
+        $normalized = 'starter';
+    }
+    $stmt = $pdo->prepare(
+        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders
+         FROM plan_settings
+         WHERE plan_code = :plan_code
+         LIMIT 1'
+    );
+    $stmt->execute([':plan_code' => $normalized]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return planSettingDefaults($normalized);
+    }
+    return [
+        'plan_code' => $row['plan_code'],
+        'customer_limit' => $row['customer_limit'] === null ? null : (int)$row['customer_limit'],
+        'can_sync' => (int)$row['can_sync'],
+        'can_export' => (int)$row['can_export'],
+        'can_multi_device' => (int)$row['can_multi_device'],
+        'can_advanced_reminders' => (int)$row['can_advanced_reminders'],
+    ];
+}
+
+function hasPlanFeature(\PDO $pdo, array $authUser, string $feature): bool
+{
+    $plan = (string)($authUser['plan_code'] ?? 'starter');
+    $settings = planSettings($pdo, $plan);
+    return ((int)($settings[$feature] ?? 0)) === 1;
+}
+
+function sendWelcomeOnboardingEmail(string $email, string $fullName): void
+{
+    $from = (string)\App\Config\Env::get('WELCOME_EMAIL_FROM', 'no-reply@ogatailor.app');
+    $support = (string)\App\Config\Env::get('SUPPORT_EMAIL', $from);
+    $subject = 'Welcome to Oga Tailor';
+    $body = "Hi {$fullName},\n\n"
+        . "Welcome to Oga Tailor.\n\n"
+        . "Here are 3 quick steps to get started:\n"
+        . "1) Add your first customer\n"
+        . "2) Save the customer's measurements\n"
+        . "3) Create orders with due dates and reminders\n\n"
+        . "Need help? Reply to {$support}\n\n"
+        . "Oga Tailor Team";
+
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        "From: Oga Tailor <{$from}>",
+        'X-Mailer: PHP/' . phpversion(),
+    ];
+
+    try {
+        @mail($email, $subject, $body, implode("\r\n", $headers));
+    } catch (\Throwable $e) {
+        error_log('welcome_email_failed: ' . $e->getMessage());
+    }
 }
 
 function enforceRateLimit(string $key, int $maxHits, int $windowSeconds): bool
@@ -238,7 +335,7 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
         ':id' => $userId,
         ':full_name' => $displayName,
         ':guest_device_id' => $deviceId,
-        ':plan_code' => 'free',
+        ':plan_code' => 'starter',
     ]);
 
     $token = issueAuthToken($pdo, $userId);
@@ -253,17 +350,22 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
 if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
     $data = requestBody();
     $fullName = trim((string)($data['full_name'] ?? ''));
+    $phone = trim((string)($data['phone_number'] ?? ''));
     $email = strtolower(trim((string)($data['email'] ?? '')));
     $password = (string)($data['password'] ?? '');
     $guestUserId = trim((string)($data['guest_user_id'] ?? ''));
 
-    if ($fullName === '' || $email === '' || $password === '') {
-        Response::json(['error' => 'full_name, email and password are required'], 422);
+    if ($fullName === '' || $phone === '' || $email === '' || $password === '') {
+        Response::json(['error' => 'full_name, phone_number, email and password are required'], 422);
         return;
     }
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         Response::json(['error' => 'email is invalid'], 422);
+        return;
+    }
+    if (!ctype_digit($phone) || strlen($phone) !== 11) {
+        Response::json(['error' => 'phone_number must be numeric and exactly 11 digits'], 422);
         return;
     }
 
@@ -293,6 +395,7 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
             'UPDATE users
              SET full_name = :full_name,
                  email = :email,
+                 phone_number = :phone_number,
                  password_hash = :password_hash,
                  is_guest = 0,
                  guest_device_id = NULL,
@@ -303,10 +406,12 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
             ':id' => $guestUserId,
             ':full_name' => $fullName,
             ':email' => $email,
+            ':phone_number' => $phone,
             ':password_hash' => $passwordHash,
         ]);
 
         $token = issueAuthToken($pdo, $guestUserId);
+        sendWelcomeOnboardingEmail($email, $fullName);
         Response::json([
             'user_id' => $guestUserId,
             'mode' => 'registered',
@@ -317,16 +422,19 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
 
     $userId = Uuid::v4();
     $createUserStmt = $pdo->prepare(
-        'INSERT INTO users (id, full_name, email, password_hash, is_guest, guest_device_id, plan_code, plan_expires_at, created_at, updated_at)
-         VALUES (:id, :full_name, :email, :password_hash, 0, NULL, :plan_code, NULL, NOW(), NOW())'
+        'INSERT INTO users (id, full_name, email, phone_number, password_hash, is_guest, guest_device_id, plan_code, plan_expires_at, created_at, updated_at)
+         VALUES (:id, :full_name, :email, :phone_number, :password_hash, 0, NULL, :plan_code, NULL, NOW(), NOW())'
     );
     $createUserStmt->execute([
         ':id' => $userId,
         ':full_name' => $fullName,
         ':email' => $email,
+        ':phone_number' => $phone,
         ':password_hash' => $passwordHash,
-        ':plan_code' => 'free',
+        ':plan_code' => 'starter',
     ]);
+
+    sendWelcomeOnboardingEmail($email, $fullName);
 
     $token = issueAuthToken($pdo, $userId);
     Response::json([
@@ -369,7 +477,7 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/login')) {
 
 if ($method === 'GET' && routeMatches($path, '/api/auth/profile')) {
     $userId = (string)($authUser['id'] ?? '');
-    $stmt = $pdo->prepare('SELECT id, full_name, email, is_guest, plan_code FROM users WHERE id = :id LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, full_name, email, phone_number, is_guest, plan_code FROM users WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $userId]);
     $user = $stmt->fetch();
     if (!$user) {
@@ -385,26 +493,57 @@ if ($method === 'PATCH' && routeMatches($path, '/api/auth/profile')) {
     $data = requestBody();
     $fullName = trim((string)($data['full_name'] ?? ''));
     $email = strtolower(trim((string)($data['email'] ?? '')));
-    if ($fullName === '' || $email === '') {
-        Response::json(['error' => 'full_name and email are required'], 422);
+    $phone = trim((string)($data['phone_number'] ?? ''));
+    if ($fullName === '' || $email === '' || $phone === '') {
+        Response::json(['error' => 'full_name, email and phone_number are required'], 422);
         return;
     }
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         Response::json(['error' => 'email is invalid'], 422);
         return;
     }
+    if (!ctype_digit($phone) || strlen($phone) !== 11) {
+        Response::json(['error' => 'phone_number must be numeric and exactly 11 digits'], 422);
+        return;
+    }
 
     $stmt = $pdo->prepare(
         'UPDATE users
-         SET full_name = :full_name, email = :email, updated_at = NOW()
+         SET full_name = :full_name, email = :email, phone_number = :phone_number, updated_at = NOW()
          WHERE id = :id'
     );
     $stmt->execute([
         ':id' => $userId,
         ':full_name' => $fullName,
         ':email' => $email,
+        ':phone_number' => $phone,
     ]);
     Response::json(['message' => 'Profile updated']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/auth/logout')) {
+    $token = bearerToken();
+    if ($token === null || $token === '') {
+        Response::json(['error' => 'Unauthorized'], 401);
+        return;
+    }
+    $tokenHash = hash('sha256', $token);
+    $stmt = $pdo->prepare('DELETE FROM auth_tokens WHERE token_hash = :token_hash');
+    $stmt->execute([':token_hash' => $tokenHash]);
+    Response::json(['message' => 'Logged out']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/auth/logout-all')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    if ($ownerId === '') {
+        Response::json(['error' => 'Unauthorized'], 401);
+        return;
+    }
+    $stmt = $pdo->prepare('DELETE FROM auth_tokens WHERE user_id = :user_id');
+    $stmt->execute([':user_id' => $ownerId]);
+    Response::json(['message' => 'Logged out from all devices']);
     return;
 }
 
@@ -549,12 +688,19 @@ if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE owner_user_id = :owner_user_id');
     $countStmt->execute([':owner_user_id' => $ownerId]);
     $customerCount = (int)$countStmt->fetchColumn();
+    $settings = planSettings($pdo, (string)($user['plan_code'] ?? 'starter'));
 
     Response::json([
         'plan_code' => $user['plan_code'],
         'plan_expires_at' => $user['plan_expires_at'],
         'customer_count' => $customerCount,
-        'customer_limit' => ($user['plan_code'] ?? 'free') === 'free' ? 100 : null,
+        'customer_limit' => $settings['customer_limit'],
+        'features' => [
+            'can_sync' => ((int)$settings['can_sync']) === 1,
+            'can_export' => ((int)$settings['can_export']) === 1,
+            'can_multi_device' => ((int)$settings['can_multi_device']) === 1,
+            'can_advanced_reminders' => ((int)$settings['can_advanced_reminders']) === 1,
+        ],
     ]);
     return;
 }
@@ -599,13 +745,15 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
         return;
     }
 
-    if (($authUser['plan_code'] ?? 'free') === 'free') {
+    $settings = planSettings($pdo, (string)($authUser['plan_code'] ?? 'starter'));
+    $customerLimit = $settings['customer_limit'];
+    if ($customerLimit !== null) {
         $countStmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE owner_user_id = :owner_user_id');
         $countStmt->execute([':owner_user_id' => $ownerId]);
         $customerCount = (int)$countStmt->fetchColumn();
-        if ($customerCount >= 100) {
+        if ($customerCount >= (int)$customerLimit) {
             Response::json([
-                'error' => 'Free plan limit reached (100 customers). Upgrade to continue.',
+                'error' => ucfirst((string)($authUser['plan_code'] ?? 'starter')) . ' plan limit reached (' . $customerLimit . ' customers). Upgrade to continue.',
             ], 403);
             return;
         }
@@ -630,17 +778,58 @@ if ($method === 'POST' && routeMatches($path, '/api/customers')) {
 
 if ($method === 'GET' && routeMatches($path, '/api/customers')) {
     $ownerId = (string)($authUser['id'] ?? '');
+    $limit = max(1, min(200, (int)($_GET['limit'] ?? 50)));
+    $offset = max(0, (int)($_GET['offset'] ?? 0));
+    $query = trim((string)($_GET['q'] ?? ''));
+    $startsWith = strtolower(trim((string)($_GET['starts_with'] ?? '')));
+    if ($startsWith !== '' && !preg_match('/^[a-z]$/', $startsWith)) {
+        Response::json(['error' => 'starts_with must be one letter a-z'], 422);
+        return;
+    }
 
-    $stmt = $pdo->prepare(
-        'SELECT id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at
-         , gender
-         FROM customers
-         WHERE owner_user_id = :owner_user_id
-         AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')
-         ORDER BY full_name ASC'
-    );
-    $stmt->execute([':owner_user_id' => $ownerId]);
-    Response::json(['data' => $stmt->fetchAll()]);
+    $countSql = 'SELECT COUNT(*)
+                 FROM customers
+                 WHERE owner_user_id = :owner_user_id
+                   AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')';
+    $rowsSql = 'SELECT id, owner_user_id, full_name, phone_number, notes, created_at, updated_at, last_modified_at
+                , gender
+                FROM customers
+                WHERE owner_user_id = :owner_user_id
+                  AND (notes IS NULL OR notes NOT LIKE \'[ARCHIVED]%\')';
+    $params = [':owner_user_id' => $ownerId];
+    if ($query !== '') {
+        $countSql .= ' AND (LOWER(full_name) LIKE :q OR phone_number LIKE :q)';
+        $rowsSql .= ' AND (LOWER(full_name) LIKE :q OR phone_number LIKE :q)';
+        $params[':q'] = '%' . strtolower($query) . '%';
+    }
+    if ($startsWith !== '') {
+        $countSql .= ' AND LOWER(full_name) LIKE :starts_with';
+        $rowsSql .= ' AND LOWER(full_name) LIKE :starts_with';
+        $params[':starts_with'] = $startsWith . '%';
+    }
+    $rowsSql .= ' ORDER BY full_name ASC LIMIT :limit_rows OFFSET :offset_rows';
+
+    $countStmt = $pdo->prepare($countSql);
+    $countStmt->execute($params);
+    $total = (int)$countStmt->fetchColumn();
+
+    $stmt = $pdo->prepare($rowsSql);
+    foreach ($params as $k => $v) {
+        $stmt->bindValue($k, $v);
+    }
+    $stmt->bindValue(':limit_rows', $limit, \PDO::PARAM_INT);
+    $stmt->bindValue(':offset_rows', $offset, \PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+    Response::json([
+        'data' => $rows,
+        'meta' => [
+            'total' => $total,
+            'limit' => $limit,
+            'offset' => $offset,
+            'has_more' => ($offset + count($rows)) < $total,
+        ],
+    ]);
     return;
 }
 
@@ -652,6 +841,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
     $gender = strtolower(trim((string)($data['gender'] ?? '')));
     $phone = trim((string)($data['phone_number'] ?? ''));
     $notes = trim((string)($data['notes'] ?? ''));
+    $clientLastModifiedAt = trim((string)($data['client_last_modified_at'] ?? ''));
 
     if ($customerId === '' || $fullName === '' || $gender === '') {
         Response::json(['error' => 'customer_id, full_name and gender are required'], 422);
@@ -687,6 +877,34 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
             'existing_customer_id' => $existing['id'],
         ], 409);
         return;
+    }
+
+    $existingStmt = $pdo->prepare(
+        'SELECT id, last_modified_at
+         FROM customers
+         WHERE id = :id AND owner_user_id = :owner_user_id
+         LIMIT 1'
+    );
+    $existingStmt->execute([
+        ':id' => $customerId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    $existingCustomer = $existingStmt->fetch();
+    if (!$existingCustomer) {
+        Response::json(['error' => 'customer not found'], 404);
+        return;
+    }
+    if ($clientLastModifiedAt !== '') {
+        $serverTs = strtotime((string)$existingCustomer['last_modified_at']);
+        $clientTs = strtotime($clientLastModifiedAt);
+        if ($serverTs !== false && $clientTs !== false && $serverTs > $clientTs) {
+            Response::json([
+                'error' => 'conflict',
+                'message' => 'Customer has changed on another device.',
+                'server_last_modified_at' => $existingCustomer['last_modified_at'],
+            ], 409);
+            return;
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -809,12 +1027,25 @@ if ($method === 'DELETE' && routeMatches($path, '/api/customers')) {
 if ($method === 'POST' && routeMatches($path, '/api/measurements')) {
     $data = requestBody();
     $measurementId = Uuid::v4();
+    $ownerId = (string)($authUser['id'] ?? '');
     $customerId = $data['customer_id'] ?? null;
     $takenAt = $data['taken_at'] ?? null;
     $payload = $data['payload'] ?? null;
 
     if (!$customerId || !$takenAt || !is_array($payload)) {
         Response::json(['error' => 'customer_id, taken_at and payload are required'], 422);
+        return;
+    }
+
+    $ownerCheck = $pdo->prepare(
+        'SELECT id FROM customers WHERE id = :customer_id AND owner_user_id = :owner_user_id LIMIT 1'
+    );
+    $ownerCheck->execute([
+        ':customer_id' => $customerId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    if (!$ownerCheck->fetch()) {
+        Response::json(['error' => 'customer not found for current user'], 404);
         return;
     }
 
@@ -834,9 +1065,22 @@ if ($method === 'POST' && routeMatches($path, '/api/measurements')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/measurements')) {
+    $ownerId = (string)($authUser['id'] ?? '');
     $customerId = $_GET['customer_id'] ?? null;
     if (!$customerId) {
         Response::json(['error' => 'customer_id is required'], 422);
+        return;
+    }
+
+    $ownerCheck = $pdo->prepare(
+        'SELECT id FROM customers WHERE id = :customer_id AND owner_user_id = :owner_user_id LIMIT 1'
+    );
+    $ownerCheck->execute([
+        ':customer_id' => $customerId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    if (!$ownerCheck->fetch()) {
+        Response::json(['error' => 'customer not found for current user'], 404);
         return;
     }
 
@@ -861,13 +1105,45 @@ if ($method === 'GET' && routeMatches($path, '/api/measurements')) {
 
 if ($method === 'PATCH' && routeMatches($path, '/api/measurements')) {
     $data = requestBody();
+    $ownerId = (string)($authUser['id'] ?? '');
     $measurementId = trim((string)($data['measurement_id'] ?? ''));
     $takenAt = trim((string)($data['taken_at'] ?? ''));
+    $clientLastModifiedAt = trim((string)($data['client_last_modified_at'] ?? ''));
     $payload = $data['payload'] ?? null;
 
     if ($measurementId === '' || $takenAt === '' || !is_array($payload)) {
         Response::json(['error' => 'measurement_id, taken_at and payload are required'], 422);
         return;
+    }
+
+    $existingStmt = $pdo->prepare(
+        'SELECT m.id, m.last_modified_at
+         FROM measurements m
+         INNER JOIN customers c ON c.id = m.customer_id
+         WHERE m.id = :id AND c.owner_user_id = :owner_user_id
+         LIMIT 1'
+    );
+    $existingStmt->execute([
+        ':id' => $measurementId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    $existing = $existingStmt->fetch();
+    if (!$existing) {
+        Response::json(['error' => 'measurement not found'], 404);
+        return;
+    }
+
+    if ($clientLastModifiedAt !== '') {
+        $serverTs = strtotime((string)$existing['last_modified_at']);
+        $clientTs = strtotime($clientLastModifiedAt);
+        if ($serverTs !== false && $clientTs !== false && $serverTs > $clientTs) {
+            Response::json([
+                'error' => 'conflict',
+                'message' => 'Measurement has changed on another device.',
+                'server_last_modified_at' => $existing['last_modified_at'],
+            ], 409);
+            return;
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -908,6 +1184,22 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
         Response::json(['error' => 'customer_id and title are required'], 422);
         return;
     }
+    if ($amountTotal < 0) {
+        Response::json(['error' => 'amount_total cannot be negative'], 422);
+        return;
+    }
+
+    $ownerCheck = $pdo->prepare(
+        'SELECT id FROM customers WHERE id = :customer_id AND owner_user_id = :owner_user_id LIMIT 1'
+    );
+    $ownerCheck->execute([
+        ':customer_id' => $customerId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    if (!$ownerCheck->fetch()) {
+        Response::json(['error' => 'customer not found for current user'], 404);
+        return;
+    }
 
     $allowedStatuses = ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
     if (!in_array($status, $allowedStatuses, true)) {
@@ -938,7 +1230,7 @@ if ($method === 'GET' && routeMatches($path, '/api/orders')) {
     $ownerId = (string)($authUser['id'] ?? '');
 
     $stmt = $pdo->prepare(
-        'SELECT o.id, o.owner_user_id, o.customer_id, c.full_name AS customer_name, o.title, o.status, o.due_date, o.amount_total, o.notes, o.created_at, o.updated_at
+        'SELECT o.id, o.owner_user_id, o.customer_id, c.full_name AS customer_name, o.title, o.status, o.due_date, o.amount_total, o.notes, o.created_at, o.updated_at, o.last_modified_at
          FROM orders o
          INNER JOIN customers c ON c.id = o.customer_id
          WHERE o.owner_user_id = :owner_user_id
@@ -954,6 +1246,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/status')) {
     $orderId = trim((string)($data['order_id'] ?? ''));
     $ownerId = (string)($authUser['id'] ?? '');
     $status = trim((string)($data['status'] ?? ''));
+    $clientLastModifiedAt = trim((string)($data['client_last_modified_at'] ?? ''));
 
     if ($orderId === '' || $status === '') {
         Response::json(['error' => 'order_id and status are required'], 422);
@@ -964,6 +1257,29 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/status')) {
     if (!in_array($status, $allowedStatuses, true)) {
         Response::json(['error' => 'invalid order status'], 422);
         return;
+    }
+
+    $existingStmt = $pdo->prepare('SELECT id, last_modified_at FROM orders WHERE id = :id AND owner_user_id = :owner_user_id LIMIT 1');
+    $existingStmt->execute([
+        ':id' => $orderId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    $existing = $existingStmt->fetch();
+    if (!$existing) {
+        Response::json(['error' => 'order not found'], 404);
+        return;
+    }
+    if ($clientLastModifiedAt !== '') {
+        $serverTs = strtotime((string)$existing['last_modified_at']);
+        $clientTs = strtotime($clientLastModifiedAt);
+        if ($serverTs !== false && $clientTs !== false && $serverTs > $clientTs) {
+            Response::json([
+                'error' => 'conflict',
+                'message' => 'Order has changed on another device.',
+                'server_last_modified_at' => $existing['last_modified_at'],
+            ], 409);
+            return;
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -991,10 +1307,34 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
     $orderId = trim((string)($data['order_id'] ?? ''));
     $ownerId = (string)($authUser['id'] ?? '');
     $dueDate = trim((string)($data['due_date'] ?? ''));
+    $clientLastModifiedAt = trim((string)($data['client_last_modified_at'] ?? ''));
 
     if ($orderId === '') {
         Response::json(['error' => 'order_id is required'], 422);
         return;
+    }
+
+    $existingStmt = $pdo->prepare('SELECT id, last_modified_at FROM orders WHERE id = :id AND owner_user_id = :owner_user_id LIMIT 1');
+    $existingStmt->execute([
+        ':id' => $orderId,
+        ':owner_user_id' => $ownerId,
+    ]);
+    $existing = $existingStmt->fetch();
+    if (!$existing) {
+        Response::json(['error' => 'order not found'], 404);
+        return;
+    }
+    if ($clientLastModifiedAt !== '') {
+        $serverTs = strtotime((string)$existing['last_modified_at']);
+        $clientTs = strtotime($clientLastModifiedAt);
+        if ($serverTs !== false && $clientTs !== false && $serverTs > $clientTs) {
+            Response::json([
+                'error' => 'conflict',
+                'message' => 'Order has changed on another device.',
+                'server_last_modified_at' => $existing['last_modified_at'],
+            ], 409);
+            return;
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -1018,8 +1358,8 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
 }
 
 if ($method === 'POST' && routeMatches($path, '/api/sync/push')) {
-    if (!requirePaid((array)$authUser)) {
-        Response::json(['error' => 'Cloud sync is available on paid plan only'], 403);
+    if (!hasPlanFeature($pdo, (array)$authUser, 'can_sync')) {
+        Response::json(['error' => 'Cloud sync is available on Growth/Pro plan only'], 403);
         return;
     }
     // Placeholder for mobile offline queue upload.
@@ -1031,8 +1371,8 @@ if ($method === 'POST' && routeMatches($path, '/api/sync/push')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/sync/pull')) {
-    if (!requirePaid((array)$authUser)) {
-        Response::json(['error' => 'Cloud sync is available on paid plan only'], 403);
+    if (!hasPlanFeature($pdo, (array)$authUser, 'can_sync')) {
+        Response::json(['error' => 'Cloud sync is available on Growth/Pro plan only'], 403);
         return;
     }
     // Placeholder for incremental changes download.
@@ -1044,23 +1384,164 @@ if ($method === 'GET' && routeMatches($path, '/api/sync/pull')) {
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/export/measurements')) {
-    if (!requirePaid((array)$authUser)) {
-        Response::json(['error' => 'Export is available on paid plan only'], 403);
+    if (!hasPlanFeature($pdo, (array)$authUser, 'can_export')) {
+        Response::json(['error' => 'Export is available on Growth/Pro plan only'], 403);
         return;
     }
 
     $ownerId = (string)($authUser['id'] ?? '');
-    $stmt = $pdo->prepare(
-        'SELECT c.full_name AS customer_name, m.taken_at, m.payload_json
-         FROM measurements m
-         INNER JOIN customers c ON c.id = m.customer_id
-         WHERE c.owner_user_id = :owner_user_id
-         ORDER BY m.taken_at DESC'
-    );
-    $stmt->execute([':owner_user_id' => $ownerId]);
+    $customerId = trim((string)($_GET['customer_id'] ?? ''));
+    $startDate = trim((string)($_GET['start_date'] ?? ''));
+    $endDate = trim((string)($_GET['end_date'] ?? ''));
+
+    $sql = 'SELECT m.id, c.id AS customer_id, c.full_name AS customer_name, m.taken_at, m.payload_json
+            FROM measurements m
+            INNER JOIN customers c ON c.id = m.customer_id
+            WHERE c.owner_user_id = :owner_user_id';
+    $params = [':owner_user_id' => $ownerId];
+    if ($customerId !== '') {
+        $sql .= ' AND c.id = :customer_id';
+        $params[':customer_id'] = $customerId;
+    }
+    if ($startDate !== '') {
+        $sql .= ' AND m.taken_at >= :start_date';
+        $params[':start_date'] = $startDate . ' 00:00:00';
+    }
+    if ($endDate !== '') {
+        $sql .= ' AND m.taken_at <= :end_date';
+        $params[':end_date'] = $endDate . ' 23:59:59';
+    }
+    $sql .= ' ORDER BY m.taken_at DESC';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $rows = $stmt->fetchAll();
 
     Response::json(['data' => $rows]);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/admin/dashboard')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $planCode = (string)($authUser['plan_code'] ?? 'starter');
+    $upcomingLimit = max(1, min(30, (int)($_GET['upcoming_limit'] ?? 8)));
+
+    $customerCountStmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE owner_user_id = :owner_user_id');
+    $customerCountStmt->execute([':owner_user_id' => $ownerId]);
+    $customerCount = (int)$customerCountStmt->fetchColumn();
+
+    $measurementCountStmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM measurements m
+         INNER JOIN customers c ON c.id = m.customer_id
+         WHERE c.owner_user_id = :owner_user_id'
+    );
+    $measurementCountStmt->execute([':owner_user_id' => $ownerId]);
+    $measurementCount = (int)$measurementCountStmt->fetchColumn();
+
+    $orderStatusStmt = $pdo->prepare(
+        'SELECT status, COUNT(*) AS total
+         FROM orders
+         WHERE owner_user_id = :owner_user_id
+         GROUP BY status'
+    );
+    $orderStatusStmt->execute([':owner_user_id' => $ownerId]);
+    $orderStatuses = $orderStatusStmt->fetchAll();
+
+    $upcomingStmt = $pdo->prepare(
+        'SELECT o.id, o.title, c.full_name AS customer_name, o.due_date, o.status
+         FROM orders o
+         INNER JOIN customers c ON c.id = o.customer_id
+         WHERE o.owner_user_id = :owner_user_id
+           AND o.due_date IS NOT NULL
+           AND o.status NOT IN (\'delivered\', \'cancelled\')
+         ORDER BY o.due_date ASC
+         LIMIT :limit_rows'
+    );
+    $upcomingStmt->bindValue(':owner_user_id', $ownerId);
+    $upcomingStmt->bindValue(':limit_rows', $upcomingLimit, \PDO::PARAM_INT);
+    $upcomingStmt->execute();
+    $upcoming = $upcomingStmt->fetchAll();
+
+    Response::json([
+        'summary' => [
+            'plan_code' => $planCode,
+            'customers' => $customerCount,
+            'measurements' => $measurementCount,
+        ],
+        'order_statuses' => $orderStatuses,
+        'upcoming_orders' => $upcoming,
+    ]);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/admin/plans')) {
+    $stmt = $pdo->query(
+        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, updated_at
+         FROM plan_settings
+         ORDER BY FIELD(plan_code, \'starter\', \'growth\', \'pro\')'
+    );
+    Response::json(['data' => $stmt->fetchAll()]);
+    return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/admin/plans')) {
+    $data = requestBody();
+    $planCode = strtolower(trim((string)($data['plan_code'] ?? '')));
+    if (!in_array($planCode, ['starter', 'growth', 'pro'], true)) {
+        Response::json(['error' => 'plan_code must be starter, growth, or pro'], 422);
+        return;
+    }
+
+    $fields = [];
+    $params = [':plan_code' => $planCode];
+
+    if (array_key_exists('customer_limit', $data)) {
+        $limit = $data['customer_limit'];
+        if ($limit !== null && (!is_numeric($limit) || (int)$limit < 1 || (int)$limit > 500000)) {
+            Response::json(['error' => 'customer_limit must be null or an integer between 1 and 500000'], 422);
+            return;
+        }
+        $fields[] = 'customer_limit = :customer_limit';
+        $params[':customer_limit'] = $limit === null ? null : (int)$limit;
+    }
+
+    $boolFields = ['can_sync', 'can_export', 'can_multi_device', 'can_advanced_reminders'];
+    foreach ($boolFields as $name) {
+        if (array_key_exists($name, $data)) {
+            $value = filter_var($data[$name], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($value === null) {
+                Response::json(['error' => $name . ' must be a boolean'], 422);
+                return;
+            }
+            $fields[] = $name . ' = :' . $name;
+            $params[':' . $name] = $value ? 1 : 0;
+        }
+    }
+
+    if (empty($fields)) {
+        Response::json(['error' => 'No updatable fields provided'], 422);
+        return;
+    }
+
+    $sql = 'UPDATE plan_settings SET ' . implode(', ', $fields) . ', updated_at = NOW() WHERE plan_code = :plan_code';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $read = $pdo->prepare(
+        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, updated_at
+         FROM plan_settings
+         WHERE plan_code = :plan_code
+         LIMIT 1'
+    );
+    $read->execute([':plan_code' => $planCode]);
+    $row = $read->fetch();
+    if (!$row) {
+        Response::json(['error' => 'Plan settings not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => 'Plan settings updated', 'data' => $row]);
     return;
 }
 
