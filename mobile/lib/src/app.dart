@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/notifications/order_reminder_service.dart';
+import 'core/preferences/theme_mode_provider.dart';
 import 'core/sync/offline_sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/application/auth_controller.dart';
@@ -16,11 +17,14 @@ class OgaTailorApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authControllerProvider);
+    final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp(
       title: 'Oga Tailor',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
+      darkTheme: buildDarkAppTheme(),
+      themeMode: themeMode,
       home: authState.when(
         loading: () => const _BootScreen(),
         error: (_, __) => const WelcomeScreen(),
