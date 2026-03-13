@@ -249,17 +249,35 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
           );
       ref.invalidate(customersProvider);
       if (!mounted) return;
-      final refreshed = await ref.read(customersProvider.future);
-      final match = refreshed.where((item) => item.id == _customer.id);
+      final page = await ref.read(customersRepositoryProvider).listCustomersPage(
+            limit: 1,
+            offset: 0,
+            query: _customer.fullName,
+            archivedMode: 'all',
+          );
+      final match = page.items.where((item) => item.id == _customer.id);
       if (match.isNotEmpty) {
         setState(() => _customer = match.first);
+      } else {
+        final existingNotes = _customer.notes ?? '';
+        setState(() {
+          _customer = Customer(
+            id: _customer.id,
+            fullName: _customer.fullName,
+            gender: _customer.gender,
+            phoneNumber: _customer.phoneNumber,
+            notes: willArchive
+                ? (existingNotes.startsWith('[ARCHIVED]') ? existingNotes : '[ARCHIVED] ${existingNotes.trim()}'.trim())
+                : existingNotes.replaceFirst(RegExp(r'^\[ARCHIVED\]\s*'), '').trim(),
+            lastModifiedAt: _customer.lastModifiedAt,
+          );
+        });
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(willArchive ? 'Customer archived' : 'Customer unarchived'),
         ),
       );
-      Navigator.of(context).pop();
       return;
     }
 

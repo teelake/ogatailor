@@ -54,6 +54,7 @@ class OrdersRepository {
     required double amountTotal,
     String? notes,
     DateTime? dueDate,
+    bool allowPastDueDate = false,
   }) async {
     final body = {
       'customer_id': customerId,
@@ -62,6 +63,7 @@ class OrdersRepository {
       'amount_total': amountTotal,
       'notes': notes,
       'due_date': dueDate == null ? null : DateFormat('yyyy-MM-dd HH:mm:ss').format(dueDate),
+      'allow_past_due_date': allowPastDueDate,
     };
     try {
       final response = await _dio.post('/api/orders', data: body);
@@ -129,10 +131,12 @@ class OrdersRepository {
     required String orderId,
     DateTime? dueDate,
     DateTime? lastKnownModifiedAt,
+    bool allowPastDueDate = false,
   }) async {
     final body = {
       'order_id': orderId,
       'due_date': dueDate == null ? '' : DateFormat('yyyy-MM-dd HH:mm:ss').format(dueDate),
+      'allow_past_due_date': allowPastDueDate,
       if (lastKnownModifiedAt != null) 'client_last_modified_at': lastKnownModifiedAt.toIso8601String(),
     };
     try {

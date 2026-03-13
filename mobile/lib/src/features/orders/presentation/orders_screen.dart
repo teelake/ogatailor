@@ -1,20 +1,51 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/error_message.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../customers/application/customers_controller.dart';
 import '../../customers/domain/customer.dart';
+import '../../invoice/data/invoice_repository.dart';
+import '../../invoice/presentation/invoice_pdf_builder.dart';
+import '../../invoice/presentation/invoice_preview_widget.dart';
+import '../../invoice/presentation/invoice_setup_screen.dart';
 import '../application/orders_controller.dart';
 import '../data/orders_repository.dart';
 import '../domain/order_entry.dart';
 
 const _kRecentOrderCustomers = 'recent_order_customers';
 const _kRecentOrderCustomersMax = 8;
+
+String _formatOrderStatus(String status) {
+  return switch (status) {
+    'in_progress' => 'In Progress',
+    'pending' => 'Pending',
+    'ready' => 'Ready',
+    'delivered' => 'Delivered',
+    'cancelled' => 'Cancelled',
+    _ => status,
+  };
+}
+
+DateTime _todayStart() {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month, now.day);
+}
+
+bool _isPastDate(DateTime date) {
+  final day = DateTime(date.year, date.month, date.day);
+  return day.isBefore(_todayStart());
+}
 
 class OrdersScreen extends ConsumerStatefulWidget {
   const OrdersScreen({super.key});
@@ -26,6 +57,7 @@ class OrdersScreen extends ConsumerStatefulWidget {
 class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   String _statusFilter = 'all';
   String _searchQuery = '';
+  final Map<String, String> _statusOverrides = {};
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +103,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                   final status = statusFilters[index];
                   final selected = status == _statusFilter;
                   return ChoiceChip(
-                    label: Text(status == 'all' ? 'All' : status),
+                    label: Text(status == 'all' ? 'All' : _formatOrderStatus(status)),
                     selected: selected,
                     onSelected: (_) => setState(() => _statusFilter = status),
                   );
@@ -82,9 +114,11 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
             Expanded(
               child: ordersAsync.when(
                 data: (orders) {
+                  String effectiveStatus(OrderEntry order) => _statusOverrides[order.id] ?? order.status;
+
                   var filtered = _statusFilter == 'all'
                       ? orders
-                      : orders.where((item) => item.status == _statusFilter).toList();
+                      : orders.where((item) => effectiveStatus(item) == _statusFilter).toList();
                   if (_searchQuery.isNotEmpty) {
                     filtered = filtered
                         .where(
@@ -100,7 +134,17 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                   return ListView.separated(
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, index) => _OrderCard(order: filtered[index]),
+                    itemBuilder: (_, index) {
+                      final order = filtered[index];
+                      return _OrderCard(
+                        order: order,
+                        displayedStatus: effectiveStatus(order),
+                        onStatusChanged: (nextStatus) {
+                          setState(() => _statusOverrides[order.id] = nextStatus);
+                          ref.invalidate(ordersProvider);
+                        },
+                      );
+                    },
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -122,23 +166,29 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
 }
 
 class _OrderCard extends ConsumerWidget {
-  const _OrderCard({required this.order});
+  const _OrderCard({
+    required this.order,
+    required this.displayedStatus,
+    required this.onStatusChanged,
+  });
 
   final OrderEntry order;
+  final String displayedStatus;
+  final ValueChanged<String> onStatusChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final session = ref.watch(authControllerProvider).valueOrNull;
-    final statuses = const ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
-
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => _OrderDetailsScreen(order: order),
-          ),
-        ),
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => _OrderDetailsScreen(order: order),
+            ),
+          );
+          ref.invalidate(ordersProvider);
+        },
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -147,7 +197,7 @@ class _OrderCard extends ConsumerWidget {
               Row(
                 children: [
                   Expanded(child: Text(order.title, style: Theme.of(context).textTheme.titleMedium)),
-                  _StatusBadge(status: order.status),
+                  _StatusBadge(status: displayedStatus),
                 ],
               ),
               const SizedBox(height: 4),
@@ -159,29 +209,81 @@ class _OrderCard extends ConsumerWidget {
                 Text('Due: ${DateFormat('dd MMM yyyy').format(order.dueDate!.toLocal())}'),
               ],
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: statuses.contains(order.status) ? order.status : 'pending',
-                decoration: const InputDecoration(labelText: 'Status'),
-                items: statuses
-                    .map((status) => DropdownMenuItem(value: status, child: Text(status)))
-                    .toList(),
-                onChanged: session == null
-                    ? null
-                    : (value) async {
-                        if (value == null || value == order.status) return;
-                        await ref.read(ordersRepositoryProvider).updateStatus(
-                              orderId: order.id,
-                              status: value,
-                              lastKnownModifiedAt: order.lastModifiedAt,
-                            );
-                        ref.invalidate(ordersProvider);
-                      },
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => _showStatusPicker(
+                    context,
+                    ref,
+                    currentStatus: displayedStatus,
+                  ),
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Change status'),
+                ),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _showStatusPicker(
+    BuildContext context,
+    WidgetRef ref, {
+    required String currentStatus,
+  }) async {
+    final statuses = const ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            const Text('Update status', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: statuses
+                  .map(
+                    (status) => ChoiceChip(
+                      label: Text(_formatOrderStatus(status)),
+                      selected: status == currentStatus,
+                      onSelected: (_) => Navigator.of(context).pop(status),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+
+    if (chosen == null || chosen == currentStatus) return;
+    onStatusChanged(chosen);
+    try {
+      await ref.read(ordersRepositoryProvider).updateStatus(
+            orderId: order.id,
+            status: chosen,
+            lastKnownModifiedAt: order.lastModifiedAt,
+          );
+    } catch (error) {
+      onStatusChanged(currentStatus);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            userFriendlyError(
+              error,
+              fallback: 'Could not update order status. Please try again.',
+            ),
+          ),
+        ),
+      );
+    }
   }
 }
 
@@ -201,6 +303,7 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
   String? _selectedCustomerId;
   String? _selectedCustomerName;
   DateTime? _selectedDueDate;
+  bool _allowPastDueDate = false;
   bool _saving = false;
 
   @override
@@ -287,7 +390,7 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                 onPressed: () async {
                   final picked = await showDatePicker(
                     context: context,
-                    firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                    firstDate: _allowPastDueDate ? DateTime.now().subtract(const Duration(days: 3650)) : _todayStart(),
                     lastDate: DateTime.now().add(const Duration(days: 3650)),
                     initialDate: _selectedDueDate ?? DateTime.now(),
                   );
@@ -296,6 +399,17 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                   }
                 },
               ),
+            ),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Order is already overdue'),
+              subtitle: const Text('Allow selecting a past due date'),
+              value: _allowPastDueDate,
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      setState(() => _allowPastDueDate = value);
+                    },
             ),
             const SizedBox(height: 16),
             ElevatedButton(
@@ -309,6 +423,14 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                         setState(() {});
                         return;
                       }
+                      if (_selectedDueDate != null &&
+                          _isPastDate(_selectedDueDate!) &&
+                          !_allowPastDueDate) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Due date cannot be in the past.')),
+                        );
+                        return;
+                      }
                       setState(() => _saving = true);
                       try {
                         final queuedOffline = await ref.read(ordersRepositoryProvider).createOrder(
@@ -320,6 +442,7 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                                   ? null
                                   : _notesController.text.trim(),
                               dueDate: _selectedDueDate,
+                              allowPastDueDate: _allowPastDueDate,
                             );
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -617,13 +740,29 @@ class _CustomerPickerSheetState extends ConsumerState<_CustomerPickerSheet> {
   }
 }
 
-class _OrderDetailsScreen extends ConsumerWidget {
+class _OrderDetailsScreen extends ConsumerStatefulWidget {
   const _OrderDetailsScreen({required this.order});
 
   final OrderEntry order;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_OrderDetailsScreen> createState() => _OrderDetailsScreenState();
+}
+
+class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
+  late String _status;
+  late DateTime? _dueDate;
+  bool _allowPastDueDate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _status = widget.order.status;
+    _dueDate = widget.order.dueDate;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final session = ref.watch(authControllerProvider).valueOrNull;
     final statuses = const ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
 
@@ -639,77 +778,103 @@ class _OrderDetailsScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(order.title, style: Theme.of(context).textTheme.titleLarge),
+                    Text(widget.order.title, style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 6),
-                    _StatusBadge(status: order.status),
+                    _StatusBadge(status: _status),
                     const SizedBox(height: 6),
-                    Text('Customer: ${order.customerName}'),
+                    Text('Customer: ${widget.order.customerName}'),
                     const SizedBox(height: 6),
-                    Text('Amount: ₦${order.amountTotal.toStringAsFixed(2)}'),
+                    Text('Amount: ₦${widget.order.amountTotal.toStringAsFixed(2)}'),
                     const SizedBox(height: 6),
                     Text(
-                      'Due date: ${order.dueDate == null ? 'No due date' : DateFormat('dd MMM yyyy').format(order.dueDate!.toLocal())}',
+                      'Due date: ${_dueDate == null ? 'No due date' : DateFormat('dd MMM yyyy').format(_dueDate!.toLocal())}',
                     ),
-                    if ((order.notes ?? '').isNotEmpty) ...[
+                    if ((widget.order.notes ?? '').isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text('Notes: ${order.notes}'),
+                      Text('Notes: ${widget.order.notes}'),
                     ],
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: statuses.contains(order.status) ? order.status : 'pending',
-              decoration: const InputDecoration(labelText: 'Update status'),
-              items: statuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-              onChanged: session == null
-                  ? null
-                  : (value) async {
-                      if (value == null || value == order.status) return;
-                      try {
-                        await ref.read(ordersRepositoryProvider).updateStatus(
-                              orderId: order.id,
-                              status: value,
-                              lastKnownModifiedAt: order.lastModifiedAt,
-                            );
-                        ref.invalidate(ordersProvider);
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Order status updated')),
-                        );
-                      } catch (error) {
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              userFriendlyError(
-                                error,
-                                fallback: 'Could not update order status. Please try again.',
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-                    },
+            Text('Update status', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: statuses
+                  .map(
+                    (status) => ChoiceChip(
+                      label: Text(_formatOrderStatus(status)),
+                      selected: status == _status,
+                      onSelected: session == null
+                          ? null
+                          : (_) async {
+                              if (status == _status) return;
+                              final previous = _status;
+                              setState(() => _status = status);
+                              try {
+                                await ref.read(ordersRepositoryProvider).updateStatus(
+                                      orderId: widget.order.id,
+                                      status: status,
+                                      lastKnownModifiedAt: widget.order.lastModifiedAt,
+                                    );
+                                ref.invalidate(ordersProvider);
+                              } catch (error) {
+                                setState(() => _status = previous);
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      userFriendlyError(
+                                        error,
+                                        fallback: 'Could not update order status. Please try again.',
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                    ),
+                  )
+                  .toList(),
             ),
             const SizedBox(height: 12),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow past due date'),
+              subtitle: const Text('Enable only when fixing an overdue order'),
+              value: _allowPastDueDate,
+              onChanged: session == null ? null : (value) => setState(() => _allowPastDueDate = value),
+            ),
+            const SizedBox(height: 6),
             OutlinedButton.icon(
               onPressed: session == null
                   ? null
                   : () async {
                       final picked = await showDatePicker(
                         context: context,
-                        firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                        firstDate: _allowPastDueDate
+                            ? DateTime.now().subtract(const Duration(days: 3650))
+                            : _todayStart(),
                         lastDate: DateTime.now().add(const Duration(days: 3650)),
-                        initialDate: order.dueDate ?? DateTime.now(),
+                        initialDate: _dueDate ?? DateTime.now(),
                       );
                       if (picked == null) return;
+                      if (_isPastDate(picked) && !_allowPastDueDate) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Due date cannot be in the past.')),
+                        );
+                        return;
+                      }
                       try {
+                        setState(() => _dueDate = picked);
                         await ref.read(ordersRepositoryProvider).updateDueDate(
-                              orderId: order.id,
+                              orderId: widget.order.id,
                               dueDate: picked,
-                              lastKnownModifiedAt: order.lastModifiedAt,
+                              lastKnownModifiedAt: widget.order.lastModifiedAt,
+                              allowPastDueDate: _allowPastDueDate,
                             );
                         ref.invalidate(ordersProvider);
                         if (!context.mounted) return;
@@ -728,15 +893,166 @@ class _OrderDetailsScreen extends ConsumerWidget {
                             ),
                           ),
                         );
+                        setState(() => _dueDate = widget.order.dueDate);
                       }
                     },
               icon: const Icon(Icons.edit_calendar_rounded),
               label: const Text('Edit Due Date'),
             ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: session == null ? null : () => _showInvoiceFlow(context),
+              icon: const Icon(Icons.receipt_long_rounded),
+              label: const Text('Generate Invoice'),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _showInvoiceFlow(BuildContext context) async {
+    final repo = ref.read(invoiceRepositoryProvider);
+    try {
+      await repo.generateFromOrder(widget.order.id);
+    } catch (e) {
+      final err = userFriendlyError(e, fallback: 'Could not generate invoice.');
+      if (err.contains('Complete invoice setup') && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(err),
+            action: SnackBarAction(
+              label: 'Setup',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const InvoiceSetupScreen()),
+                );
+              },
+            ),
+          ),
+        );
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    Map<String, dynamic> invoice;
+    try {
+      invoice = await repo.getByOrderId(widget.order.id);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(userFriendlyError(e, fallback: 'Could not load invoice.'))),
+        );
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => _InvoiceShareSheet(invoice: invoice),
+    );
+  }
+}
+
+class _InvoiceShareSheet extends StatefulWidget {
+  const _InvoiceShareSheet({required this.invoice});
+
+  final Map<String, dynamic> invoice;
+
+  @override
+  State<_InvoiceShareSheet> createState() => _InvoiceShareSheetState();
+}
+
+class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
+  final _previewKey = GlobalKey();
+
+  Map<String, dynamic> get invoice => widget.invoice;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Share Invoice', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            const Text('Choose how to share with your customer'),
+            const SizedBox(height: 16),
+            RepaintBoundary(
+              key: _previewKey,
+              child: InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _sharePdf(context),
+                    icon: const Icon(Icons.picture_as_pdf_rounded),
+                    label: const Text('PDF'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _shareImage(context),
+                    icon: const Icon(Icons.image_rounded),
+                    label: const Text('Image'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sharePdf(BuildContext context) async {
+    try {
+      final bytes = await buildInvoicePdf(invoice);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/invoice_${invoice['invoice_number'] ?? 'inv'}.pdf');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)], text: 'Invoice from your tailor');
+      if (context.mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(userFriendlyError(e, fallback: 'Could not create PDF.'))),
+        );
+      }
+    }
+  }
+
+  Future<void> _shareImage(BuildContext context) async {
+    try {
+      final bytes = await _captureInvoiceImage();
+      if (bytes == null) return;
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/invoice_${invoice['invoice_number'] ?? 'inv'}.png');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)], text: 'Invoice from your tailor');
+      if (context.mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(userFriendlyError(e, fallback: 'Could not create image.'))),
+        );
+      }
+    }
+  }
+
+  Future<Uint8List?> _captureInvoiceImage() async {
+    final boundary = _previewKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    final image = await boundary.toImage(pixelRatio: 3.0);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
   }
 }
 
@@ -762,7 +1078,7 @@ class _StatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        status,
+        _formatOrderStatus(status),
         style: TextStyle(
           color: color.shade700,
           fontWeight: FontWeight.w600,

@@ -347,9 +347,21 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
     return;
 }
 
+function validateCacNumber(string $cac): bool
+{
+    $cac = strtoupper(trim($cac));
+    if (strlen($cac) < 4) {
+        return false;
+    }
+    $prefix = substr($cac, 0, 2);
+    $rest = substr($cac, 2);
+    return in_array($prefix, ['BN', 'RC'], true) && ctype_digit($rest);
+}
+
 if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
     $data = requestBody();
     $fullName = trim((string)($data['full_name'] ?? ''));
+    $businessName = trim((string)($data['business_name'] ?? ''));
     $phone = trim((string)($data['phone_number'] ?? ''));
     $email = strtolower(trim((string)($data['email'] ?? '')));
     $password = (string)($data['password'] ?? '');
@@ -394,6 +406,7 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
         $upgradeStmt = $pdo->prepare(
             'UPDATE users
              SET full_name = :full_name,
+                 business_name = :business_name,
                  email = :email,
                  phone_number = :phone_number,
                  password_hash = :password_hash,
@@ -405,6 +418,7 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
         $upgradeStmt->execute([
             ':id' => $guestUserId,
             ':full_name' => $fullName,
+            ':business_name' => $businessName !== '' ? $businessName : null,
             ':email' => $email,
             ':phone_number' => $phone,
             ':password_hash' => $passwordHash,
@@ -422,12 +436,13 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
 
     $userId = Uuid::v4();
     $createUserStmt = $pdo->prepare(
-        'INSERT INTO users (id, full_name, email, phone_number, password_hash, is_guest, guest_device_id, plan_code, plan_expires_at, created_at, updated_at)
-         VALUES (:id, :full_name, :email, :phone_number, :password_hash, 0, NULL, :plan_code, NULL, NOW(), NOW())'
+        'INSERT INTO users (id, full_name, business_name, email, phone_number, password_hash, is_guest, guest_device_id, plan_code, plan_expires_at, created_at, updated_at)
+         VALUES (:id, :full_name, :business_name, :email, :phone_number, :password_hash, 0, NULL, :plan_code, NULL, NOW(), NOW())'
     );
     $createUserStmt->execute([
         ':id' => $userId,
         ':full_name' => $fullName,
+        ':business_name' => $businessName !== '' ? $businessName : null,
         ':email' => $email,
         ':phone_number' => $phone,
         ':password_hash' => $passwordHash,
@@ -477,13 +492,17 @@ if ($method === 'POST' && routeMatches($path, '/api/auth/login')) {
 
 if ($method === 'GET' && routeMatches($path, '/api/auth/profile')) {
     $userId = (string)($authUser['id'] ?? '');
-    $stmt = $pdo->prepare('SELECT id, full_name, email, phone_number, is_guest, plan_code FROM users WHERE id = :id LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, full_name, business_name, email, phone_number, is_guest, plan_code FROM users WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $userId]);
     $user = $stmt->fetch();
     if (!$user) {
         Response::json(['error' => 'user not found'], 404);
         return;
     }
+    $bpStmt = $pdo->prepare('SELECT invoice_setup_completed_at FROM business_profiles WHERE owner_user_id = :owner_user_id LIMIT 1');
+    $bpStmt->execute([':owner_user_id' => $userId]);
+    $bp = $bpStmt->fetch();
+    $user['invoice_setup_completed'] = $bp && $bp['invoice_setup_completed_at'] !== null;
     Response::json(['data' => $user]);
     return;
 }
@@ -492,6 +511,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/auth/profile')) {
     $userId = (string)($authUser['id'] ?? '');
     $data = requestBody();
     $fullName = trim((string)($data['full_name'] ?? ''));
+    $businessName = trim((string)($data['business_name'] ?? ''));
     $email = strtolower(trim((string)($data['email'] ?? '')));
     $phone = trim((string)($data['phone_number'] ?? ''));
     if ($fullName === '' || $email === '' || $phone === '') {
@@ -509,12 +529,13 @@ if ($method === 'PATCH' && routeMatches($path, '/api/auth/profile')) {
 
     $stmt = $pdo->prepare(
         'UPDATE users
-         SET full_name = :full_name, email = :email, phone_number = :phone_number, updated_at = NOW()
+         SET full_name = :full_name, business_name = :business_name, email = :email, phone_number = :phone_number, updated_at = NOW()
          WHERE id = :id'
     );
     $stmt->execute([
         ':id' => $userId,
         ':full_name' => $fullName,
+        ':business_name' => $businessName !== '' ? $businessName : null,
         ':email' => $email,
         ':phone_number' => $phone,
     ]);
@@ -1187,6 +1208,7 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
     $title = trim((string)($data['title'] ?? ''));
     $status = trim((string)($data['status'] ?? 'pending'));
     $dueDate = trim((string)($data['due_date'] ?? ''));
+    $allowPastDueDate = filter_var(($data['allow_past_due_date'] ?? false), FILTER_VALIDATE_BOOLEAN);
     $amountTotal = (float)($data['amount_total'] ?? 0);
     $notes = trim((string)($data['notes'] ?? ''));
 
@@ -1215,6 +1237,18 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
     if (!in_array($status, $allowedStatuses, true)) {
         Response::json(['error' => 'invalid order status'], 422);
         return;
+    }
+    if ($dueDate !== '') {
+        $dueTs = strtotime($dueDate);
+        if ($dueTs === false) {
+            Response::json(['error' => 'due_date is invalid'], 422);
+            return;
+        }
+        $todayStart = strtotime(date('Y-m-d 00:00:00'));
+        if (!$allowPastDueDate && $todayStart !== false && $dueTs < $todayStart) {
+            Response::json(['error' => 'due_date cannot be in the past'], 422);
+            return;
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -1317,11 +1351,24 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
     $orderId = trim((string)($data['order_id'] ?? ''));
     $ownerId = (string)($authUser['id'] ?? '');
     $dueDate = trim((string)($data['due_date'] ?? ''));
+    $allowPastDueDate = filter_var(($data['allow_past_due_date'] ?? false), FILTER_VALIDATE_BOOLEAN);
     $clientLastModifiedAt = trim((string)($data['client_last_modified_at'] ?? ''));
 
     if ($orderId === '') {
         Response::json(['error' => 'order_id is required'], 422);
         return;
+    }
+    if ($dueDate !== '') {
+        $dueTs = strtotime($dueDate);
+        if ($dueTs === false) {
+            Response::json(['error' => 'due_date is invalid'], 422);
+            return;
+        }
+        $todayStart = strtotime(date('Y-m-d 00:00:00'));
+        if (!$allowPastDueDate && $todayStart !== false && $dueTs < $todayStart) {
+            Response::json(['error' => 'due_date cannot be in the past'], 422);
+            return;
+        }
     }
 
     $existingStmt = $pdo->prepare('SELECT id, last_modified_at FROM orders WHERE id = :id AND owner_user_id = :owner_user_id LIMIT 1');
@@ -1364,6 +1411,293 @@ if ($method === 'PATCH' && routeMatches($path, '/api/orders/due-date')) {
     }
 
     Response::json(['message' => 'Order due date updated']);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/business-profile')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $stmt = $pdo->prepare(
+        'SELECT id, owner_user_id, business_name, business_phone, business_email, business_address,
+                cac_registered, cac_registration_type, cac_number, vat_enabled, default_vat_rate,
+                currency, payment_terms, invoice_setup_completed_at, created_at, updated_at
+         FROM business_profiles
+         WHERE owner_user_id = :owner_user_id
+         LIMIT 1'
+    );
+    $stmt->execute([':owner_user_id' => $ownerId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        Response::json(['error' => 'Business profile not found. Complete invoice setup first.'], 404);
+        return;
+    }
+    $row['invoice_setup_completed'] = $row['invoice_setup_completed_at'] !== null;
+    Response::json(['data' => $row]);
+    return;
+}
+
+if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $data = requestBody();
+    $businessName = trim((string)($data['business_name'] ?? ''));
+    $businessPhone = trim((string)($data['business_phone'] ?? ''));
+    $businessEmail = strtolower(trim((string)($data['business_email'] ?? '')));
+    $businessAddress = trim((string)($data['business_address'] ?? ''));
+    $cacRegistered = filter_var($data['cac_registered'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $cacRegistrationType = strtolower(trim((string)($data['cac_registration_type'] ?? '')));
+    $cacNumber = trim((string)($data['cac_number'] ?? ''));
+    $vatEnabled = filter_var($data['vat_enabled'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $defaultVatRate = (float)($data['default_vat_rate'] ?? 0);
+    $currency = strtoupper(trim((string)($data['currency'] ?? 'NGN')));
+    $paymentTerms = trim((string)($data['payment_terms'] ?? ''));
+
+    if ($businessName === '') {
+        Response::json(['error' => 'business_name is required'], 422);
+        return;
+    }
+    if ($businessPhone !== '' && (!ctype_digit($businessPhone) || strlen($businessPhone) > 15)) {
+        Response::json(['error' => 'business_phone must be numeric and max 15 digits'], 422);
+        return;
+    }
+    if ($businessEmail !== '' && !filter_var($businessEmail, FILTER_VALIDATE_EMAIL)) {
+        Response::json(['error' => 'business_email is invalid'], 422);
+        return;
+    }
+    if ($cacRegistered) {
+        if (!in_array($cacRegistrationType, ['company', 'business'], true)) {
+            Response::json(['error' => 'cac_registration_type must be company or business when CAC registered'], 422);
+            return;
+        }
+        if ($cacNumber === '' || !validateCacNumber($cacNumber)) {
+            Response::json(['error' => 'cac_number is required and must start with BN or RC followed by digits'], 422);
+            return;
+        }
+    } else {
+        $cacRegistrationType = null;
+        $cacNumber = null;
+    }
+    if ($vatEnabled && ($defaultVatRate < 0 || $defaultVatRate > 100)) {
+        Response::json(['error' => 'default_vat_rate must be between 0 and 100 when VAT is enabled'], 422);
+        return;
+    }
+
+    $existingStmt = $pdo->prepare('SELECT id FROM business_profiles WHERE owner_user_id = :owner_user_id LIMIT 1');
+    $existingStmt->execute([':owner_user_id' => $ownerId]);
+    $existing = $existingStmt->fetch();
+
+    $now = date('Y-m-d H:i:s');
+    if ($existing) {
+        $stmt = $pdo->prepare(
+            'UPDATE business_profiles
+             SET business_name = :business_name, business_phone = :business_phone, business_email = :business_email,
+                 business_address = :business_address, cac_registered = :cac_registered,
+                 cac_registration_type = :cac_registration_type, cac_number = :cac_number,
+                 vat_enabled = :vat_enabled, default_vat_rate = :default_vat_rate,
+                 currency = :currency, payment_terms = :payment_terms,
+                 invoice_setup_completed_at = :invoice_setup_completed_at, updated_at = :updated_at
+             WHERE owner_user_id = :owner_user_id'
+        );
+        $stmt->execute([
+            ':owner_user_id' => $ownerId,
+            ':business_name' => $businessName,
+            ':business_phone' => $businessPhone !== '' ? $businessPhone : null,
+            ':business_email' => $businessEmail !== '' ? $businessEmail : null,
+            ':business_address' => $businessAddress !== '' ? $businessAddress : null,
+            ':cac_registered' => $cacRegistered ? 1 : 0,
+            ':cac_registration_type' => $cacRegistrationType,
+            ':cac_number' => $cacNumber !== '' ? $cacNumber : null,
+            ':vat_enabled' => $vatEnabled ? 1 : 0,
+            ':default_vat_rate' => $defaultVatRate,
+            ':currency' => $currency !== '' ? $currency : 'NGN',
+            ':payment_terms' => $paymentTerms !== '' ? $paymentTerms : null,
+            ':invoice_setup_completed_at' => $now,
+            ':updated_at' => $now,
+        ]);
+    } else {
+        $profileId = Uuid::v4();
+        $stmt = $pdo->prepare(
+            'INSERT INTO business_profiles (id, owner_user_id, business_name, business_phone, business_email, business_address,
+                    cac_registered, cac_registration_type, cac_number, vat_enabled, default_vat_rate,
+                    currency, payment_terms, invoice_setup_completed_at, created_at, updated_at)
+             VALUES (:id, :owner_user_id, :business_name, :business_phone, :business_email, :business_address,
+                    :cac_registered, :cac_registration_type, :cac_number, :vat_enabled, :default_vat_rate,
+                    :currency, :payment_terms, :invoice_setup_completed_at, :created_at, :updated_at)'
+        );
+        $stmt->execute([
+            ':id' => $profileId,
+            ':owner_user_id' => $ownerId,
+            ':business_name' => $businessName,
+            ':business_phone' => $businessPhone !== '' ? $businessPhone : null,
+            ':business_email' => $businessEmail !== '' ? $businessEmail : null,
+            ':business_address' => $businessAddress !== '' ? $businessAddress : null,
+            ':cac_registered' => $cacRegistered ? 1 : 0,
+            ':cac_registration_type' => $cacRegistrationType,
+            ':cac_number' => $cacNumber !== '' ? $cacNumber : null,
+            ':vat_enabled' => $vatEnabled ? 1 : 0,
+            ':default_vat_rate' => $defaultVatRate,
+            ':currency' => $currency !== '' ? $currency : 'NGN',
+            ':payment_terms' => $paymentTerms !== '' ? $paymentTerms : null,
+            ':invoice_setup_completed_at' => $now,
+            ':created_at' => $now,
+            ':updated_at' => $now,
+        ]);
+    }
+    Response::json(['message' => 'Invoice setup completed']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/invoices/generate')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $data = requestBody();
+    $orderId = trim((string)($data['order_id'] ?? ''));
+
+    if ($orderId === '') {
+        Response::json(['error' => 'order_id is required'], 422);
+        return;
+    }
+
+    $bpStmt = $pdo->prepare(
+        'SELECT business_name, business_phone, business_email, business_address, vat_enabled, default_vat_rate, currency, payment_terms
+         FROM business_profiles
+         WHERE owner_user_id = :owner_user_id AND invoice_setup_completed_at IS NOT NULL
+         LIMIT 1'
+    );
+    $bpStmt->execute([':owner_user_id' => $ownerId]);
+    $bp = $bpStmt->fetch();
+    if (!$bp) {
+        Response::json(['error' => 'Complete invoice setup in Settings before generating invoices'], 403);
+        return;
+    }
+
+    $orderStmt = $pdo->prepare(
+        'SELECT o.id, o.customer_id, o.title, o.amount_total, o.due_date, c.full_name AS customer_name, c.phone_number AS customer_phone
+         FROM orders o
+         INNER JOIN customers c ON c.id = o.customer_id
+         WHERE o.id = :order_id AND o.owner_user_id = :owner_user_id
+         LIMIT 1'
+    );
+    $orderStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
+    $order = $orderStmt->fetch();
+    if (!$order) {
+        Response::json(['error' => 'Order not found'], 404);
+        return;
+    }
+
+    $existingInvoiceStmt = $pdo->prepare('SELECT id, invoice_number FROM invoices WHERE order_id = :order_id AND owner_user_id = :owner_user_id LIMIT 1');
+    $existingInvoiceStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
+    $existingInvoice = $existingInvoiceStmt->fetch();
+    if ($existingInvoice) {
+        Response::json([
+            'message' => 'Invoice already exists for this order',
+            'invoice_id' => $existingInvoice['id'],
+            'invoice_number' => $existingInvoice['invoice_number'],
+        ], 200);
+        return;
+    }
+
+    $seqStmt = $pdo->prepare(
+        'SELECT COALESCE(MAX(CAST(invoice_number AS UNSIGNED)), 0) + 1 AS next_num
+         FROM invoices
+         WHERE owner_user_id = :owner_user_id'
+    );
+    $seqStmt->execute([':owner_user_id' => $ownerId]);
+    $nextNum = (int)$seqStmt->fetchColumn();
+    $invoiceNumber = (string)$nextNum;
+
+    $subtotal = (float)$order['amount_total'];
+    $vatRate = ((int)$bp['vat_enabled']) === 1 ? (float)$bp['default_vat_rate'] : 0;
+    $vatAmount = $subtotal * ($vatRate / 100);
+    $total = $subtotal + $vatAmount;
+    $issuedAt = date('Y-m-d H:i:s');
+    $dueAt = $order['due_date'] ?? null;
+
+    $invoiceId = Uuid::v4();
+    $itemId = Uuid::v4();
+
+    try {
+        $pdo->beginTransaction();
+
+        $invStmt = $pdo->prepare(
+            'INSERT INTO invoices (id, owner_user_id, order_id, invoice_number, subtotal_amount, discount_amount, total_amount, issued_at, due_at, status, created_at, updated_at, last_modified_at)
+             VALUES (:id, :owner_user_id, :order_id, :invoice_number, :subtotal, 0, :total, :issued_at, :due_at, \'issued\', NOW(), NOW(), NOW())'
+        );
+        $invStmt->execute([
+            ':id' => $invoiceId,
+            ':owner_user_id' => $ownerId,
+            ':order_id' => $orderId,
+            ':invoice_number' => $invoiceNumber,
+            ':subtotal' => $subtotal,
+            ':total' => $total,
+            ':issued_at' => $issuedAt,
+            ':due_at' => $dueAt,
+        ]);
+
+        $itemStmt = $pdo->prepare(
+            'INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount, created_at)
+             VALUES (:id, :invoice_id, :description, 1, :unit_price, :amount, NOW())'
+        );
+        $itemStmt->execute([
+            ':id' => $itemId,
+            ':invoice_id' => $invoiceId,
+            ':description' => (string)$order['title'],
+            ':unit_price' => $subtotal,
+            ':amount' => $subtotal,
+        ]);
+
+        $pdo->commit();
+    } catch (\Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        Response::json(['error' => 'Failed to create invoice: ' . $e->getMessage()], 500);
+        return;
+    }
+
+    Response::json([
+        'message' => 'Invoice generated',
+        'invoice_id' => $invoiceId,
+        'invoice_number' => $invoiceNumber,
+        'order_id' => $orderId,
+        'total_amount' => $total,
+        'currency' => (string)$bp['currency'],
+    ], 201);
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/invoices/by-order')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $orderId = trim((string)($_GET['order_id'] ?? ''));
+    if ($orderId === '') {
+        Response::json(['error' => 'order_id is required'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT i.id, i.order_id, i.invoice_number, i.subtotal_amount, i.discount_amount, i.total_amount,
+                i.issued_at, i.due_at, i.status,
+                bp.business_name, bp.business_phone, bp.business_email, bp.business_address,
+                bp.currency, bp.vat_enabled, bp.default_vat_rate, bp.payment_terms,
+                o.title AS order_title, o.amount_total AS order_amount, o.notes AS order_notes,
+                c.full_name AS customer_name, c.phone_number AS customer_phone'
+        . ' FROM invoices i'
+        . ' INNER JOIN business_profiles bp ON bp.owner_user_id = i.owner_user_id'
+        . ' INNER JOIN orders o ON o.id = i.order_id'
+        . ' INNER JOIN customers c ON c.id = o.customer_id'
+        . ' WHERE i.order_id = :order_id AND i.owner_user_id = :owner_user_id'
+        . ' LIMIT 1'
+    );
+    $stmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
+    $invoice = $stmt->fetch();
+    if (!$invoice) {
+        Response::json(['error' => 'Invoice not found for this order'], 404);
+        return;
+    }
+
+    $itemsStmt = $pdo->prepare(
+        'SELECT id, description, quantity, unit_price, amount FROM invoice_items WHERE invoice_id = :invoice_id ORDER BY created_at'
+    );
+    $itemsStmt->execute([':invoice_id' => $invoice['id']]);
+    $invoice['items'] = $itemsStmt->fetchAll();
+
+    Response::json(['data' => $invoice]);
     return;
 }
 

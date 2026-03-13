@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/presentation/change_password_screen.dart';
 import '../../auth/presentation/edit_profile_screen.dart';
+import '../../invoice/presentation/invoice_setup_screen.dart';
 import '../../orders/application/orders_controller.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/presentation/upgrade_screen.dart';
@@ -32,6 +33,14 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsSection(
             title: 'Account',
             children: [
+              _SettingsTile(
+                icon: Icons.receipt_long_rounded,
+                title: 'Invoice Setup',
+                subtitle: 'Business details for generating invoices',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const InvoiceSetupScreen()),
+                ),
+              ),
               _SettingsTile(
                 icon: Icons.person_rounded,
                 title: 'Edit Profile',

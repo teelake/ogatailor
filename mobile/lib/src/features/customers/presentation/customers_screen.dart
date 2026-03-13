@@ -84,23 +84,21 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
             _SyncStatusBanner(syncStatusAsync: syncStatusAsync),
             const SizedBox(height: 10),
             SizedBox(
-              height: 38,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _customerFilterOptions.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 6),
-                itemBuilder: (_, index) {
-                  final option = _customerFilterOptions[index];
-                  final selected = option == _archiveFilter;
-                  return ChoiceChip(
-                    label: Text(option == 'active' ? 'ACTIVE' : option == 'archived' ? 'ARCHIVED' : 'ALL'),
-                    selected: selected,
-                    onSelected: (_) {
-                      setState(() => _archiveFilter = option);
-                      _reload();
-                    },
-                  );
-                },
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'active', label: Text('Active')),
+                    ButtonSegment(value: 'archived', label: Text('Archived')),
+                    ButtonSegment(value: 'all', label: Text('All')),
+                  ],
+                  selected: {_archiveFilter},
+                  onSelectionChanged: (selected) {
+                    setState(() => _archiveFilter = selected.first);
+                    _reload();
+                  },
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -234,7 +232,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       final useLocalFilteredMode = query.isNotEmpty || startsWith.isNotEmpty;
 
       if (useLocalFilteredMode) {
-        final all = await ref.read(customersRepositoryProvider).listCustomers();
+        final all = await ref.read(customersRepositoryProvider).listCustomers(archivedMode: 'all');
         final filtered = all.where((customer) {
           final name = customer.fullName.toLowerCase();
           final phone = (customer.phoneNumber ?? '').toLowerCase();
@@ -340,12 +338,6 @@ const _alphaOptions = [
   'x',
   'y',
   'z',
-];
-
-const _customerFilterOptions = [
-  'active',
-  'archived',
-  'all',
 ];
 
 class _PlanBadge extends StatelessWidget {

@@ -14,12 +14,16 @@ class CustomersRepository {
   final Dio _dio;
   final OfflineSyncService _offlineSync;
 
-  Future<List<Customer>> listCustomers() async {
+  Future<List<Customer>> listCustomers({String archivedMode = 'exclude'}) async {
     final all = <Customer>[];
     var offset = 0;
     const limit = 200;
     while (true) {
-      final page = await listCustomersPage(limit: limit, offset: offset);
+      final page = await listCustomersPage(
+        limit: limit,
+        offset: offset,
+        archivedMode: archivedMode,
+      );
       all.addAll(page.items);
       if (!page.hasMore || page.items.isEmpty) break;
       offset += page.items.length;
@@ -165,9 +169,34 @@ class CustomersRepository {
     };
     try {
       await _dio.post('/api/customers/archive', data: body);
+      await _updateCustomerArchiveInCache(customerId: customerId, archived: archived);
       await _offlineSync.processQueue();
     } catch (_) {
+      await _updateCustomerArchiveInCache(customerId: customerId, archived: archived);
       await _offlineSync.enqueue(method: 'POST', path: '/api/customers/archive', data: body);
+    }
+  }
+
+  Future<void> _updateCustomerArchiveInCache({
+    required String customerId,
+    required bool archived,
+  }) async {
+    final rows = await _offlineSync.readCache('cache_customers');
+    if (rows.isEmpty) return;
+    var changed = false;
+    for (final row in rows) {
+      if ((row['id'] ?? '').toString() != customerId) continue;
+      final notes = (row['notes'] ?? '').toString();
+      if (archived) {
+        row['notes'] = notes.startsWith('[ARCHIVED]') ? notes : '[ARCHIVED] ${notes.trim()}'.trim();
+      } else {
+        row['notes'] = notes.replaceFirst(RegExp(r'^\[ARCHIVED\]\s*'), '').trim();
+      }
+      changed = true;
+      break;
+    }
+    if (changed) {
+      await _offlineSync.saveCache('cache_customers', rows);
     }
   }
 

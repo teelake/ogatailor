@@ -27,6 +27,7 @@ Base URL: `https://your-domain.com/api`
     - `phone_number` (string, required, numeric, exactly 11 digits)
     - `email` (string, required)
     - `password` (string, required)
+    - `business_name` (string, optional) – brand/business name
     - `guest_user_id` (string UUID, optional for guest upgrade)
   - if `guest_user_id` is provided, guest data owner is upgraded in place
 - `POST /api/auth/login`
@@ -39,6 +40,7 @@ Base URL: `https://your-domain.com/api`
     - `full_name`
     - `email`
     - `phone_number` (required, numeric, exactly 11 digits)
+    - `business_name` (string, optional)
 - `POST /api/auth/change-password` (protected)
   - body:
     - `current_password`
@@ -132,6 +134,33 @@ Base URL: `https://your-domain.com/api`
     - `order_id`
     - `due_date` (nullable)
     - `client_last_modified_at` (optional; ISO datetime for conflict detection)
+
+## Business Profile (Invoice Setup)
+
+- `GET /api/business-profile` (protected)
+  - returns 404 if invoice setup not completed
+- `PATCH /api/business-profile` (protected)
+  - body:
+    - `business_name` (string, required)
+    - `business_phone` (string, optional)
+    - `business_email` (string, optional)
+    - `business_address` (string, optional)
+    - `cac_registered` (boolean)
+    - `cac_registration_type` (`company`|`business`, required if cac_registered)
+    - `cac_number` (string, BN/RC prefix + digits, required if cac_registered)
+    - `vat_enabled` (boolean)
+    - `default_vat_rate` (number, 0–100 when vat_enabled)
+    - `currency` (string, default NGN)
+    - `payment_terms` (string, optional)
+
+## Invoices
+
+- `POST /api/invoices/generate` (protected)
+  - body: `order_id` (required)
+  - requires business profile (invoice setup) completed
+  - returns 200 if invoice already exists for order
+- `GET /api/invoices/by-order?order_id={uuid}` (protected)
+  - returns full invoice data for PDF/image generation
 
 ## Plan Summary
 

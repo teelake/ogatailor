@@ -27,6 +27,7 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
   Future<void> register({
     required String fullName,
     String? phoneNumber,
+    String? businessName,
     required String email,
     required String password,
   }) async {
@@ -36,6 +37,7 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
       () => _repository.register(
         fullName: fullName,
         phoneNumber: phoneNumber,
+        businessName: businessName,
         email: email,
         password: password,
         guestUserId: current?.mode == 'guest' ? current?.userId : null,

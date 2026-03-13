@@ -16,6 +16,7 @@ class EditProfileScreen extends ConsumerStatefulWidget {
 class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
+  final _businessNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   bool _loading = true;
@@ -30,6 +31,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   @override
   void dispose() {
     _fullNameController.dispose();
+    _businessNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     super.dispose();
@@ -39,6 +41,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     try {
       final profile = await ref.read(authRepositoryProvider).fetchProfile();
       _fullNameController.text = (profile['full_name'] ?? '').toString();
+      _businessNameController.text = (profile['business_name'] ?? '').toString();
       _emailController.text = (profile['email'] ?? '').toString();
       _phoneController.text = (profile['phone_number'] ?? '').toString();
     } catch (_) {}
@@ -65,6 +68,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         if (v == null || v.trim().isEmpty) return 'Full name is required';
                         return null;
                       },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _businessNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Business / brand name (optional)',
+                        hintText: 'e.g. Base07 Clothings',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -111,6 +122,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                     fullName: _fullNameController.text.trim(),
                                     email: _emailController.text.trim(),
                                     phoneNumber: _phoneController.text.trim(),
+                                    businessName: _businessNameController.text.trim().isEmpty
+                                        ? null
+                                        : _businessNameController.text.trim(),
                                   );
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(

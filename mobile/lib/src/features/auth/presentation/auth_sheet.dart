@@ -26,7 +26,9 @@ class _AuthSheet extends ConsumerStatefulWidget {
 
 class _AuthSheetState extends ConsumerState<_AuthSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _fullNameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _businessNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -36,7 +38,9 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
 
   @override
   void dispose() {
-    _fullNameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _businessNameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
@@ -69,10 +73,32 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
             ),
             const SizedBox(height: 12),
             if (isRegister) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _firstNameController,
+                      decoration: const InputDecoration(labelText: 'First name'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _lastNameController,
+                      decoration: const InputDecoration(labelText: 'Last name'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               TextFormField(
-                controller: _fullNameController,
-                decoration: const InputDecoration(labelText: 'Full name'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Full name is required' : null,
+                controller: _businessNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Business / brand name (optional)',
+                  hintText: 'e.g. Base07 Clothings',
+                ),
               ),
               const SizedBox(height: 10),
               TextFormField(
@@ -154,6 +180,27 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
                   : () => _submit(isRegister: isRegister),
               child: Text(isRegister ? 'Create Account' : 'Sign In'),
             ),
+            const SizedBox(height: 6),
+            if (isRegister)
+              TextButton(
+                onPressed: loading
+                    ? null
+                    : () {
+                        Navigator.of(context).pop();
+                        showAuthSheet(context, mode: AuthSheetMode.login);
+                      },
+                child: const Text('Already have an account? Sign in'),
+              ),
+            if (!isRegister)
+              TextButton(
+                onPressed: loading
+                    ? null
+                    : () {
+                        Navigator.of(context).pop();
+                        showAuthSheet(context, mode: AuthSheetMode.register);
+                      },
+                child: const Text('Don\'t have an account? Create one'),
+              ),
             if (authState.hasError) ...[
               const SizedBox(height: 10),
               if (isConnectivityIssue(authState.error ?? Exception('Authentication failed')))
@@ -211,9 +258,14 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
   Future<void> _submit({required bool isRegister}) async {
     if (!_formKey.currentState!.validate()) return;
     if (isRegister) {
+      final firstName = _firstNameController.text.trim();
+      final lastName = _lastNameController.text.trim();
+      final fullName = '$firstName $lastName'.trim();
+      final businessName = _businessNameController.text.trim();
       await ref.read(authControllerProvider.notifier).register(
-            fullName: _fullNameController.text.trim(),
+            fullName: fullName,
             phoneNumber: _phoneController.text.trim(),
+            businessName: businessName.isEmpty ? null : businessName,
             email: _emailController.text.trim(),
             password: _passwordController.text,
           );

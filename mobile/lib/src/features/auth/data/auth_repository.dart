@@ -77,6 +77,7 @@ class AuthRepository {
   Future<AuthSession> register({
     required String fullName,
     String? phoneNumber,
+    String? businessName,
     required String email,
     required String password,
     String? guestUserId,
@@ -86,6 +87,7 @@ class AuthRepository {
       data: {
         'full_name': fullName,
         'phone_number': phoneNumber,
+        if (businessName != null && businessName.trim().isNotEmpty) 'business_name': businessName.trim(),
         'email': email,
         'password': password,
         if (guestUserId != null && guestUserId.isNotEmpty) 'guest_user_id': guestUserId,
@@ -132,6 +134,7 @@ class AuthRepository {
     required String fullName,
     required String email,
     String? phoneNumber,
+    String? businessName,
   }) async {
     await _dio.patch(
       '/api/auth/profile',
@@ -139,6 +142,7 @@ class AuthRepository {
         'full_name': fullName,
         'email': email,
         'phone_number': phoneNumber,
+        if (businessName != null) 'business_name': businessName,
       },
     );
   }
