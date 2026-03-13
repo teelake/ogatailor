@@ -9,6 +9,7 @@ import '../../orders/application/orders_controller.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/presentation/upgrade_screen.dart';
 import '../../reports/presentation/export_reports_screen.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/preferences/measurement_unit_provider.dart';
 import '../../../core/preferences/order_reminder_preferences_provider.dart';
 import '../../../core/preferences/theme_mode_provider.dart';
@@ -343,11 +344,17 @@ class _PlanBadge extends StatelessWidget {
   }
 }
 
-class _OrderReminderTile extends ConsumerWidget {
+class _OrderReminderTile extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_OrderReminderTile> createState() => _OrderReminderTileState();
+}
+
+class _OrderReminderTileState extends ConsumerState<_OrderReminderTile> {
+  bool _showAdvancedReminders = false;
   static const _advancedOffsets = [14, 7, 3, 1, 0];
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final prefs = ref.watch(orderReminderPreferencesProvider);
     final planSummary = ref.watch(planSummaryProvider).valueOrNull;
     final isPremium = planSummary?.hasPremiumAccess ?? false;
@@ -406,15 +413,52 @@ class _OrderReminderTile extends ConsumerWidget {
                   }
                 },
               ),
-              const SizedBox(height: 8),
-              Text(
-                isPremium ? 'Reminder schedule' : 'Reminder schedule (Starter fixed)',
-                style: Theme.of(context).textTheme.titleSmall,
+              const SizedBox(height: 4),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Alarm sound for due today'),
+                subtitle: const Text('Louder notification when order is due today'),
+                value: prefs.alarmSoundForDueToday,
+                onChanged: (v) async {
+                  await ref.read(orderReminderPreferencesProvider.notifier).setAlarmSoundForDueToday(v);
+                  await reschedule();
+                },
               ),
-              const SizedBox(height: 8),
-              if (!isPremium)
-                const Text('Starter uses: 7 days, 1 day, and due day.')
-              else
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () => setState(() => _showAdvancedReminders = !_showAdvancedReminders),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _showAdvancedReminders ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _showAdvancedReminders ? 'Hide schedule options' : 'Schedule & more options',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_showAdvancedReminders) ...[
+                const SizedBox(height: 12),
+                Text(
+                  isPremium ? 'When to remind' : 'Reminder schedule (Starter fixed)',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 8),
+                if (!isPremium)
+                  const Text('Starter: 7 days, 1 day, and due day before.')
+                else
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -438,6 +482,73 @@ class _OrderReminderTile extends ConsumerWidget {
                     );
                   }).toList(),
                 ),
+              if (isPremium) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Multiple times per day',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Get reminders at each time (e.g. 9:00 and 18:00)',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ...prefs.reminderTimes.map((t) => Chip(
+                      label: Text(t.label),
+                      onDeleted: () async {
+                        final updated = prefs.reminderTimes.where((x) => x.hour != t.hour || x.minute != t.minute).toList();
+                        await ref.read(orderReminderPreferencesProvider.notifier).setReminderTimes(updated);
+                        await reschedule();
+                      },
+                    )),
+                    if (prefs.reminderTimes.length < 3)
+                      ActionChip(
+                        label: const Text('+ Add time'),
+                        onPressed: () async {
+                          final picked = await showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay(hour: prefs.hour, minute: prefs.minute),
+                          );
+                          if (picked != null) {
+                            final updated = [...prefs.reminderTimes, ReminderTime(picked.hour, picked.minute)];
+                            await ref.read(orderReminderPreferencesProvider.notifier).setReminderTimes(updated);
+                            await reschedule();
+                          }
+                        },
+                      ),
+                  ],
+                ),
+                if (prefs.reminderTimes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Use single time above, or add more times',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Daily email digest'),
+                  subtitle: const Text('Summary of upcoming orders by email'),
+                  value: prefs.emailDigestEnabled,
+                  onChanged: (v) async {
+                    await ref.read(orderReminderPreferencesProvider.notifier).setEmailDigestEnabled(v);
+                    try {
+                      if (v) {
+                        await ref.read(dioProvider).post('/api/reminders/daily-digest/subscribe');
+                      } else {
+                        await ref.read(dioProvider).post('/api/reminders/daily-digest/unsubscribe');
+                      }
+                    } catch (_) {}
+                  },
+                ),
+              ],
             ],
           ],
         ),

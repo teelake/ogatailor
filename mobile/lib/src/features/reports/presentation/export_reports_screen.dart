@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/error_message.dart';
+import '../../../core/widgets/empty_state.dart';
 import '../../customers/application/customers_controller.dart';
 
 class ExportReportsScreen extends ConsumerStatefulWidget {
@@ -21,6 +22,7 @@ class _ExportReportsScreenState extends ConsumerState<ExportReportsScreen> {
   DateTime? _endDate;
   String? _selectedCustomerId;
   bool _loading = false;
+  bool _hasGeneratedReport = false;
   List<Map<String, dynamic>> _rows = const [];
 
   @override
@@ -113,7 +115,15 @@ class _ExportReportsScreenState extends ConsumerState<ExportReportsScreen> {
             const SizedBox(height: 10),
             Expanded(
               child: _rows.isEmpty
-                  ? const Center(child: Text('No report generated yet'))
+                  ? EmptyState(
+                      icon: Icons.assessment_outlined,
+                      title: _hasGeneratedReport
+                          ? 'No measurements found'
+                          : 'No report generated yet',
+                      tip: _hasGeneratedReport
+                          ? 'Try a different date range or customer filter'
+                          : 'Pick date range and customer (optional), then tap Generate Report above',
+                    )
                   : ListView.separated(
                       itemCount: _rows.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -169,7 +179,10 @@ class _ExportReportsScreenState extends ConsumerState<ExportReportsScreen> {
       final map = Map<String, dynamic>.from(response.data as Map);
       final rows = List<Map<String, dynamic>>.from((map['data'] ?? const <dynamic>[]) as List);
       if (!mounted) return;
-      setState(() => _rows = rows);
+      setState(() {
+        _rows = rows;
+        _hasGeneratedReport = true;
+      });
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/sync/offline_sync_service.dart';
+import '../../../core/widgets/empty_state.dart';
 import '../../../core/utils/error_message.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/domain/plan_summary.dart';
@@ -166,7 +167,14 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       );
     }
     if (_items.isEmpty) {
-      return const _EmptyState();
+      final hasFilters = _archiveFilter != 'all' || _alphaFilter != 'all' || _query.isNotEmpty;
+      return EmptyState(
+        icon: hasFilters ? Icons.search_off_rounded : Icons.people_alt_outlined,
+        title: hasFilters ? 'No customers match' : 'No customers yet',
+        tip: hasFilters
+            ? 'Try a different filter, search term, or view All customers'
+            : 'Add your first customer to start tracking orders and measurements',
+      );
     }
 
     return ListView.separated(
@@ -512,37 +520,3 @@ class _SyncStatusBanner extends ConsumerWidget {
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: const Icon(Icons.people_alt_outlined, color: AppColors.primary, size: 34),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'No customers yet',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Tap "Add Customer" to save your first client profile.',
-            style: Theme.of(context).textTheme.bodyMedium,
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-}

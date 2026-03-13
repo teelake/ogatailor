@@ -27,6 +27,7 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
   bool _saving = false;
   bool _cacRegistered = false;
   bool _vatEnabled = false;
+  bool _showAdvancedOptions = false;
   String _cacType = 'company';
   String _currency = 'NGN';
 
@@ -82,15 +83,18 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Complete your business details to generate invoices. Required before using the invoice feature.',
+                      'Add your business details so invoices show your brand. Only the basics are required.',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 20),
+                    Text('Basic info', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
+                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _businessNameController,
                       decoration: const InputDecoration(
                         labelText: 'Business / brand name',
                         hintText: 'e.g. Base07 Clothings',
+                        helperText: 'This appears at the top of your invoices',
                       ),
                       validator: (v) =>
                           (v == null || v.trim().isEmpty) ? 'Business name is required' : null,
@@ -102,6 +106,7 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Business phone number',
                         hintText: 'e.g. 08012345678',
+                        helperText: 'Optional — for customers to contact you',
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -111,6 +116,7 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Business email',
                         hintText: 'e.g. hello@yourbusiness.com',
+                        helperText: 'Optional — shown on invoices',
                       ),
                       validator: (v) {
                         final s = (v ?? '').trim();
@@ -130,79 +136,123 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                         hintText: 'Full address for invoices',
                       ),
                     ),
-                    const SizedBox(height: 24),
-                    Text('CAC registration', style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: 8),
-                    SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Business registered with CAC'),
-                      subtitle: const Text('Corporate Affairs Commission'),
-                      value: _cacRegistered,
-                      onChanged: (v) => setState(() => _cacRegistered = v),
-                    ),
-                    if (_cacRegistered) ...[
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _cacType,
-                        decoration: const InputDecoration(labelText: 'Registration type'),
-                        items: const [
-                          DropdownMenuItem(value: 'company', child: Text('Company')),
-                          DropdownMenuItem(value: 'business', child: Text('Business registration')),
-                        ],
-                        onChanged: (v) => setState(() => _cacType = v ?? 'company'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _cacNumberController,
-                        decoration: const InputDecoration(
-                          labelText: 'CAC registration number',
-                          hintText: 'e.g. BN1234567 or RC1234567',
+                    const SizedBox(height: 20),
+                    InkWell(
+                      onTap: () => setState(() => _showAdvancedOptions = !_showAdvancedOptions),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _showAdvancedOptions ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _showAdvancedOptions ? 'Hide optional settings' : 'More options (CAC, VAT, etc.)',
+                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        validator: _cacRegistered
-                            ? (v) {
-                                final s = (v ?? '').trim().toUpperCase();
-                                if (s.isEmpty) return 'CAC number is required';
-                                if (!_cacRegex.hasMatch(s)) {
-                                  return 'Must start with BN or RC followed by digits';
-                                }
-                                return null;
-                              }
-                            : null,
                       ),
-                    ],
-                    const SizedBox(height: 24),
-                    Text('Invoice settings', style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: 8),
-                    SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Include VAT on invoices'),
-                      value: _vatEnabled,
-                      onChanged: (v) => setState(() => _vatEnabled = v),
                     ),
-                    if (_vatEnabled) ...[
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _vatRateController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Default VAT rate (%)',
-                          hintText: 'e.g. 7.5',
+                    if (_showAdvancedOptions) ...[
+                      const SizedBox(height: 16),
+                      Text('CAC registration', style: Theme.of(context).textTheme.titleSmall),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'CAC = Corporate Affairs Commission. Only needed if your business is officially registered.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
-                        validator: _vatEnabled
-                            ? (v) {
-                                final n = double.tryParse((v ?? '').trim());
-                                if (n == null || n < 0 || n > 100) {
-                                  return 'Enter a rate between 0 and 100';
-                                }
-                                return null;
-                              }
-                            : null,
                       ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Business registered with CAC'),
+                        value: _cacRegistered,
+                        onChanged: (v) => setState(() => _cacRegistered = v),
+                      ),
+                      if (_cacRegistered) ...[
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          value: _cacType,
+                          decoration: const InputDecoration(labelText: 'Registration type'),
+                          items: const [
+                            DropdownMenuItem(value: 'company', child: Text('Company')),
+                            DropdownMenuItem(value: 'business', child: Text('Business registration')),
+                          ],
+                          onChanged: (v) => setState(() => _cacType = v ?? 'company'),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _cacNumberController,
+                          decoration: const InputDecoration(
+                            labelText: 'CAC registration number',
+                            hintText: 'e.g. BN1234567 or RC1234567',
+                            helperText: 'Starts with BN or RC, then numbers',
+                          ),
+                          validator: _cacRegistered
+                              ? (v) {
+                                  final s = (v ?? '').trim().toUpperCase();
+                                  if (s.isEmpty) return 'CAC number is required';
+                                  if (!_cacRegex.hasMatch(s)) {
+                                    return 'Must start with BN or RC followed by digits';
+                                  }
+                                  return null;
+                                }
+                              : null,
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      Text('Invoice settings', style: Theme.of(context).textTheme.titleSmall),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'VAT = Value Added Tax. Turn on if you charge tax on your services.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Include VAT on invoices'),
+                        value: _vatEnabled,
+                        onChanged: (v) => setState(() => _vatEnabled = v),
+                      ),
+                      if (_vatEnabled) ...[
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _vatRateController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Default VAT rate (%)',
+                            hintText: 'e.g. 7.5',
+                            helperText: 'Common rate in Nigeria is 7.5%',
+                          ),
+                          validator: _vatEnabled
+                              ? (v) {
+                                  final n = double.tryParse((v ?? '').trim());
+                                  if (n == null || n < 0 || n > 100) {
+                                    return 'Enter a rate between 0 and 100';
+                                  }
+                                  return null;
+                                }
+                              : null,
+                        ),
+                      ],
                     ],
+                    const SizedBox(height: 20),
+                    Text('Invoice format', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       value: _currency,
-                      decoration: const InputDecoration(labelText: 'Currency'),
+                      decoration: const InputDecoration(
+                        labelText: 'Currency',
+                        helperText: 'Currency shown on your invoices',
+                      ),
                       items: const [
                         DropdownMenuItem(value: 'NGN', child: Text('NGN (₦)')),
                         DropdownMenuItem(value: 'USD', child: Text('USD (\$)')),
@@ -216,6 +266,7 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Payment terms',
                         hintText: 'e.g. Due on receipt, Net 30',
+                        helperText: 'When payment is expected (e.g. "Due on receipt" or "Pay within 7 days")',
                       ),
                     ),
                     const SizedBox(height: 24),

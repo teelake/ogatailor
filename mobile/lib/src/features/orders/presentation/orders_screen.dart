@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/error_message.dart';
+import '../../../core/widgets/empty_state.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../customers/application/customers_controller.dart';
 import '../../customers/domain/customer.dart';
@@ -45,6 +46,20 @@ DateTime _todayStart() {
 bool _isPastDate(DateTime date) {
   final day = DateTime(date.year, date.month, date.day);
   return day.isBefore(_todayStart());
+}
+
+bool _isDueToday(DateTime? due) {
+  if (due == null) return false;
+  final d = DateTime(due.year, due.month, due.day);
+  return d == _todayStart();
+}
+
+bool _isUpcomingInDays(DateTime? due, int days) {
+  if (due == null) return false;
+  final d = DateTime(due.year, due.month, due.day);
+  final today = _todayStart();
+  final end = today.add(Duration(days: days));
+  return !d.isBefore(today) && !d.isAfter(end);
 }
 
 class OrdersScreen extends ConsumerStatefulWidget {
@@ -115,6 +130,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
               child: ordersAsync.when(
                 data: (orders) {
                   String effectiveStatus(OrderEntry order) => _statusOverrides[order.id] ?? order.status;
+                  final activeOrders = orders.where((o) => effectiveStatus(o) != 'delivered' && effectiveStatus(o) != 'cancelled').toList();
+                  final dueToday = activeOrders.where((o) => _isDueToday(o.dueDate)).toList();
 
                   var filtered = _statusFilter == 'all'
                       ? orders
@@ -128,23 +145,76 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                         )
                         .toList();
                   }
-                  if (filtered.isEmpty) {
-                    return const Center(child: Text('No orders for this filter.'));
-                  }
-                  return ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, index) {
-                      final order = filtered[index];
-                      return _OrderCard(
-                        order: order,
-                        displayedStatus: effectiveStatus(order),
-                        onStatusChanged: (nextStatus) {
-                          setState(() => _statusOverrides[order.id] = nextStatus);
-                          ref.invalidate(ordersProvider);
-                        },
-                      );
-                    },
+                  return CustomScrollView(
+                    slivers: [
+                      if (dueToday.isNotEmpty && _statusFilter == 'all') ...[
+                        SliverToBoxAdapter(
+                          child: Card(
+                            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.today_rounded, color: Theme.of(context).colorScheme.primary),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Due today (${dueToday.length})',
+                                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ...dueToday.map((order) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      '• ${order.title} — ${order.customerName}',
+                                      style: Theme.of(context).textTheme.bodyMedium,
+                                    ),
+                                  )),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                      ],
+                      if (filtered.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: EmptyState(
+                            icon: Icons.assignment_outlined,
+                            title: orders.isEmpty ? 'No orders yet' : 'No orders match your filter',
+                            tip: orders.isEmpty
+                                ? 'Tap the + button to create your first order'
+                                : 'Try a different status or search term',
+                          ),
+                        )
+                      else
+                        SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) {
+                              final order = filtered[index];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _OrderCard(
+                                  order: order,
+                                  displayedStatus: effectiveStatus(order),
+                                  onStatusChanged: (nextStatus) {
+                                    setState(() => _statusOverrides[order.id] = nextStatus);
+                                    ref.invalidate(ordersProvider);
+                                  },
+                                ),
+                              );
+                            },
+                            childCount: filtered.length,
+                          ),
+                        ),
+                    ],
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -624,7 +694,12 @@ class _CustomerPickerSheetState extends ConsumerState<_CustomerPickerSheet> {
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
                     : _items.isEmpty
-                        ? const Center(child: Text('No customers found'))
+                        ? EmptyState(
+                            icon: Icons.person_search_rounded,
+                            title: 'No customers found',
+                            tip: 'Try a different search term, or add a customer first',
+                            compact: true,
+                          )
                         : ListView.separated(
                             itemCount: _items.length + 1,
                             separatorBuilder: (_, __) => const SizedBox(height: 6),

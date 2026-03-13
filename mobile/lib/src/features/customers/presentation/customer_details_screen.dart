@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/empty_state.dart';
 import '../../../core/utils/phone_launcher.dart';
 import '../../auth/application/auth_controller.dart';
 import '../application/customers_controller.dart';
@@ -101,7 +102,26 @@ class _CustomerDetailsScreenState extends ConsumerState<CustomerDetailsScreen> {
               child: measurementsAsync.when(
                 data: (entries) {
                   if (entries.isEmpty) {
-                    return const Center(child: Text('No measurements yet.'));
+                    return EmptyState(
+                      icon: Icons.straighten_outlined,
+                      title: 'No measurements yet',
+                      tip: 'Add your first measurement to track sizes for this customer',
+                      action: OutlinedButton.icon(
+                        onPressed: () async {
+                          await Navigator.of(context).push<bool>(
+                            MaterialPageRoute(
+                              builder: (_) => AddMeasurementScreen(
+                                customerId: _customer.id,
+                                customerGender: _customer.gender,
+                              ),
+                            ),
+                          );
+                          ref.invalidate(customerMeasurementsProvider(_customer.id));
+                        },
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Add Measurement'),
+                      ),
+                    );
                   }
 
                   return ListView.separated(
