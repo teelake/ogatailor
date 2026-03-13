@@ -551,6 +551,7 @@ class _OrderReminderTileState extends ConsumerState<_OrderReminderTile> {
               ],
             ],
           ],
+          ],
         ),
       ),
     );

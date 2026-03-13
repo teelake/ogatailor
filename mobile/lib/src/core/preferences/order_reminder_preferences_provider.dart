@@ -25,6 +25,7 @@ class OrderReminderPreferences {
     required this.offsetDays,
     required this.reminderTimes,
     required this.emailDigestEnabled,
+    required this.alarmSoundForDueToday,
   });
 
   final bool enabled;
