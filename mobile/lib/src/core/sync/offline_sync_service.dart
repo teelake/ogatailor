@@ -153,6 +153,22 @@ class OfflineSyncService {
       'conflict_count': (await syncConflicts()).length,
     };
   }
+
+  /// Clears all user-specific local data (cache, pending ops). Call when switching
+  /// users (e.g. login) to prevent data leak between accounts on the same device.
+  Future<void> clearUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys();
+    for (final key in keys) {
+      if (key.startsWith('cache_') ||
+          key == _kPendingOps ||
+          key == _kStatus ||
+          key == _kLastError ||
+          key == _kConflicts) {
+        await prefs.remove(key);
+      }
+    }
+  }
 }
 
 final offlineSyncServiceProvider = Provider<OfflineSyncService>((ref) {

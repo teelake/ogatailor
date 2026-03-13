@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme/app_colors.dart';
+import '../features/auth/application/auth_controller.dart';
+import '../features/auth/presentation/auth_sheet.dart';
 import '../features/customers/presentation/customers_screen.dart';
 import '../features/orders/application/orders_controller.dart';
 import '../features/orders/presentation/orders_screen.dart';
@@ -27,6 +29,8 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final session = ref.watch(authControllerProvider).valueOrNull;
+    final isGuest = session?.mode == 'guest';
     final ordersAsync = ref.watch(ordersProvider);
     final upcomingCount = ordersAsync.valueOrNull
         ?.where((o) {
@@ -40,12 +44,51 @@ class _MainShellState extends ConsumerState<MainShell> {
         .length ?? 0;
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: const [
-          CustomersScreen(),
-          OrdersScreen(),
-          SettingsScreen(),
+      body: Column(
+        children: [
+          if (isGuest)
+            Material(
+              color: AppColors.primary.withOpacity(0.12),
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 20, color: AppColors.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Create an account to save your data',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppColors.primaryDark,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => showAuthSheet(context, mode: AuthSheetMode.register),
+                        child: const Text('Sign up'),
+                      ),
+                      TextButton(
+                        onPressed: () => showAuthSheet(context, mode: AuthSheetMode.login),
+                        child: const Text('Sign in'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: IndexedStack(
+              index: _currentIndex,
+              children: const [
+                CustomersScreen(),
+                OrdersScreen(),
+                SettingsScreen(),
+              ],
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(

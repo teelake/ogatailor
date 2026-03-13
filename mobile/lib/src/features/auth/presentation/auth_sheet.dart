@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/error_message.dart';
+import '../../customers/application/customers_controller.dart';
+import '../../orders/application/orders_controller.dart';
 import '../application/auth_controller.dart';
 import 'forgot_password_screen.dart';
 
@@ -278,6 +280,8 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
 
     final latest = ref.read(authControllerProvider);
     if (!latest.hasError && context.mounted) {
+      ref.invalidate(ordersProvider);
+      ref.invalidate(customersProvider);
       Navigator.of(context).pop();
     }
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/application/auth_controller.dart';
+import '../../auth/presentation/auth_sheet.dart';
 import '../../auth/presentation/change_password_screen.dart';
 import '../../auth/presentation/edit_profile_screen.dart';
 import '../../invoice/presentation/invoice_setup_screen.dart';
@@ -26,6 +27,8 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final planSummaryAsync = ref.watch(planSummaryProvider);
+    final session = ref.watch(authControllerProvider).valueOrNull;
+    final isGuest = session?.mode == 'guest';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -34,6 +37,21 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsSection(
             title: 'Account',
             children: [
+              if (isGuest) ...[
+                _SettingsTile(
+                  icon: Icons.person_add_rounded,
+                  title: 'Create account',
+                  subtitle: 'Save your data and sync across devices',
+                  onTap: () => showAuthSheet(context, mode: AuthSheetMode.register),
+                ),
+                _SettingsTile(
+                  icon: Icons.login_rounded,
+                  title: 'Sign in',
+                  subtitle: 'Already have an account? Sign in here',
+                  onTap: () => showAuthSheet(context, mode: AuthSheetMode.login),
+                ),
+                const SizedBox(height: 8),
+              ],
               _SettingsTile(
                 icon: Icons.receipt_long_rounded,
                 title: 'Invoice Setup',
@@ -50,14 +68,15 @@ class SettingsScreen extends ConsumerWidget {
                   MaterialPageRoute(builder: (_) => const EditProfileScreen()),
                 ),
               ),
-              _SettingsTile(
-                icon: Icons.lock_rounded,
-                title: 'Change Password',
-                subtitle: 'Update your password',
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+              if (!isGuest)
+                _SettingsTile(
+                  icon: Icons.lock_rounded,
+                  title: 'Change Password',
+                  subtitle: 'Update your password',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+                  ),
                 ),
-              ),
             ],
           ),
           _SettingsSection(

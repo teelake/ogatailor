@@ -1,14 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/sync/offline_sync_service.dart';
 import '../data/auth_repository.dart';
 import '../domain/auth_session.dart';
 
 class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
-  AuthController(this._repository) : super(const AsyncValue.loading()) {
+  AuthController(this._repository, this._offlineSync) : super(const AsyncValue.loading()) {
     _init();
   }
 
   final AuthRepository _repository;
+  final OfflineSyncService _offlineSync;
 
   Future<void> _init() async {
     final session = await _repository.restoreSession();
@@ -50,7 +52,11 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
     required String password,
   }) async {
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() => _repository.login(email: email, password: password));
+    state = await AsyncValue.guard(() async {
+      final session = await _repository.login(email: email, password: password);
+      await _offlineSync.clearUserData();
+      return session;
+    });
   }
 
   Future<void> logout() async {
@@ -61,5 +67,8 @@ class AuthController extends StateNotifier<AsyncValue<AuthSession?>> {
 
 final authControllerProvider =
     StateNotifierProvider<AuthController, AsyncValue<AuthSession?>>((ref) {
-  return AuthController(ref.watch(authRepositoryProvider));
+  return AuthController(
+    ref.watch(authRepositoryProvider),
+    ref.read(offlineSyncServiceProvider),
+  );
 });
