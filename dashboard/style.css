@@ -284,6 +284,56 @@ body.login-page {
 
 .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 700; }
+.stat-delta { font-size: 12px; font-weight: 600; display: block; margin-top: 6px; }
+.stat-delta.positive { color: var(--accent); }
+.stat-delta.negative { color: var(--danger); }
+
+/* Dashboard hero */
+.dashboard-hero { margin-bottom: 28px; }
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 20px;
+}
+.hero-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+}
+.hero-value { font-size: 32px; font-weight: 700; display: block; margin-bottom: 6px; }
+.hero-label { font-size: 13px; color: var(--text-muted); }
+
+/* Activity chart */
+.activity-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+  margin-bottom: 12px;
+}
+.activity-bar {
+  flex: 1;
+  min-width: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+.activity-fill {
+  width: 100%;
+  min-height: 4px;
+  background: linear-gradient(180deg, var(--accent), #34d399);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: height 0.2s;
+}
+.activity-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
 /* Forms */
 .form-group { margin-bottom: 20px; }
@@ -494,6 +544,7 @@ table.data-table {
   accent-color: var(--accent);
 }
 
+.inline-form { display: inline-flex; align-items: center; gap: 8px; }
 .inline-form select {
   padding: 8px 12px;
   font-size: 13px;
