@@ -277,5 +277,7 @@ INSERT INTO platform_settings (setting_key, setting_value, updated_at) VALUES
   ('watermark_type', 'both', NOW()),
   ('watermark_logo_url', NULL, NOW()),
   ('watermark_website_url', 'https://ogatailor.app', NOW()),
-  ('watermark_plans', 'starter', NOW())
+  ('watermark_plans', 'starter', NOW()),
+  ('platform_url', 'https://ogatailor.app', NOW()),
+  ('platform_logo_url', NULL, NOW())
 ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);

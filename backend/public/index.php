@@ -326,6 +326,7 @@ if (!enforceRateLimit($ip . '|' . $path, 120, 60)) {
 
 $isPublicRoute = ($method === 'GET' && ($path === '/' || routeMatches($path, '/health'))) ||
     routeMatches($path, '/api/debug/request') ||
+    routeMatches($path, '/api/config') ||
     routeMatches($path, '/api/auth/guest-start') ||
     routeMatches($path, '/api/auth/register') ||
     routeMatches($path, '/api/auth/login') ||
@@ -390,6 +391,22 @@ if ($method === 'GET' && routeMatches($path, '/api/reminders/send-digests')) {
         error_log('send_digests_failed: ' . $e->getMessage());
         Response::json(['error' => $e->getMessage()], 500);
     }
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/config')) {
+    $stmt = $pdo->query(
+        "SELECT setting_key, setting_value FROM platform_settings
+         WHERE setting_key IN ('platform_url', 'platform_logo_url')"
+    );
+    $settings = [];
+    while ($row = $stmt->fetch()) {
+        $settings[$row['setting_key']] = $row['setting_value'] ?? '';
+    }
+    Response::json([
+        'platform_url' => $settings['platform_url'] ?? 'https://ogatailor.app',
+        'platform_logo_url' => $settings['platform_logo_url'] ?? null,
+    ]);
     return;
 }
 

@@ -1,1 +1,6 @@
 
+[14-Mar-2026 13:46:26 UTC] PHP Fatal error:  Uncaught RuntimeException: Database connection failed: could not find driver in C:\mobile-app-projects\oga-tailor\backend\src\Database\Connection.php:31
+Stack trace:
+#0 C:\mobile-app-projects\oga-tailor\run_migration.php(3): App\Database\Connection::make()
+#1 {main}
+  thrown in C:\mobile-app-projects\oga-tailor\backend\src\Database\Connection.php on line 31

@@ -14,6 +14,13 @@ Base URL: `https://your-domain.com/api`
 
 - `GET /health`
 
+## Config (public)
+
+- `GET /api/config`
+  - returns platform branding for mobile app:
+    - `platform_url` (string) – base URL for API/web
+    - `platform_logo_url` (string|null) – logo URL or base64 data URI
+
 ## Auth (Guest-First)
 
 - `POST /api/auth/guest-start`

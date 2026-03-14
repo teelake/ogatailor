@@ -109,6 +109,8 @@ $upcomingStmt->execute();
 $upcomingOrders = $upcomingStmt->fetchAll();
 
 $periodLabel = $days === 'all' ? 'All time' : "Last {$days} days";
+$base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+$base = $base ?: '/';
 $pageTitle = 'Platform Dashboard';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -320,6 +322,7 @@ require __DIR__ . '/includes/header.php';
                     <td>
                         <strong><?= escapeHtml($t['full_name']) ?></strong>
                         <?php if (!empty($t['email'])): ?><br><span class="muted" style="font-size:12px;"><?= escapeHtml($t['email']) ?></span><?php endif; ?>
+                        <br><a href="<?= $base ?>/reports?view=customers&tailor_id=<?= urlencode($t['id']) ?>" class="muted" style="font-size:12px;">View in Reports →</a>
                     </td>
                     <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($t['plan_code'])) ?></span></td>
                     <td><?= (int)$t['cust_count'] ?></td>

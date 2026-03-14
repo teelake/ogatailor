@@ -20,6 +20,7 @@ $navItems = [
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Oga Tailor Admin<?= isset($pageTitle) ? ' - ' . escapeHtml($pageTitle) : '' ?></title>
+    <link rel="icon" type="image/svg+xml" href="<?= $base ?>/favicon.svg">
     <link rel="stylesheet" href="<?= $base ?>/style.css">
 </head>
 <body>
@@ -51,3 +52,6 @@ $navItems = [
         </div>
     </aside>
     <main class="main-content">
+    <?php if (!empty($breadcrumbs)): ?>
+    <nav class="breadcrumbs"><?= $breadcrumbs ?></nav>
+    <?php endif; ?>

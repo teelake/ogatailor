@@ -96,11 +96,23 @@ body.login-page {
   border-color: var(--accent);
 }
 
-.login-form .error {
+.login-form .error,
+.login-form .login-error {
   color: var(--danger);
   font-size: 13px;
   margin-bottom: 16px;
 }
+.login-form .login-success {
+  color: var(--accent);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.login-form .login-footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 13px;
+}
+.login-form .login-footer a { color: var(--accent); }
 
 .btn {
   display: inline-flex;
@@ -637,3 +649,75 @@ table.data-table {
 }
 
 .upcoming-list li:last-child { border-bottom: none; }
+
+/* Modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+}
+.modal-content {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.modal-header h3 { font-size: 18px; }
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 24px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+.modal-close:hover { color: var(--text); }
+.actions-cell { white-space: nowrap; }
+.actions-cell .btn { margin-right: 6px; margin-bottom: 4px; }
+.actions-cell .inline-form { display: inline; }
+
+/* Breadcrumbs */
+.breadcrumbs {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+.breadcrumbs a { color: var(--accent); }
+.breadcrumbs a:hover { text-decoration: underline; }
+.breadcrumbs span { color: var(--text-dim); }
+
+/* Loading */
+.btn.loading { pointer-events: none; opacity: 0.7; }
+.btn.loading::after {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

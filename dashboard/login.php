@@ -13,28 +13,44 @@ if (adminLoggedIn()) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = strtolower(trim((string)($_POST['email'] ?? '')));
-    $password = (string)($_POST['password'] ?? '');
-
-    if ($email === '' || $password === '') {
-        $error = 'Email and password are required.';
+    if (!verifyCsrf()) {
+        $error = 'Invalid request. Please refresh and try again.';
     } else {
-        $stmt = $pdo->prepare(
-            'SELECT id, email, full_name, password_hash, profile_picture FROM admin_users WHERE email = :email LIMIT 1'
-        );
-        $stmt->execute([':email' => $email]);
-        $admin = $stmt->fetch();
+        $email = strtolower(trim((string)($_POST['email'] ?? '')));
+        $password = (string)($_POST['password'] ?? '');
+        $remember = isset($_POST['remember']);
 
-        if (!$admin || !password_verify($password, (string)$admin['password_hash'])) {
-            $error = 'Invalid email or password.';
+        if ($email === '' || $password === '') {
+            $error = 'Email and password are required.';
+        } elseif (isLoginLocked($pdo, $email)) {
+            $error = 'Too many failed attempts. Try again in 15 minutes.';
         } else {
-            $_SESSION['admin_id'] = $admin['id'];
-            $_SESSION['admin_email'] = $admin['email'];
-            $_SESSION['admin_name'] = $admin['full_name'];
-            $_SESSION['admin_profile_picture'] = $admin['profile_picture'] ?? null;
-            $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
-            header('Location: ' . ($base ?: '/') . '/');
-            exit;
+            $stmt = $pdo->prepare(
+                'SELECT id, email, full_name, password_hash, profile_picture FROM admin_users WHERE email = :email LIMIT 1'
+            );
+            $stmt->execute([':email' => $email]);
+            $admin = $stmt->fetch();
+
+            if (!$admin || !password_verify($password, (string)$admin['password_hash'])) {
+                recordLoginAttempt($pdo, $email, false);
+                $error = 'Invalid email or password.';
+            } else {
+                clearLoginAttempts($pdo, $email);
+                session_regenerate_id(true);
+                $_SESSION['admin_id'] = $admin['id'];
+                $_SESSION['admin_email'] = $admin['email'];
+                $_SESSION['admin_name'] = $admin['full_name'];
+                $_SESSION['admin_profile_picture'] = $admin['profile_picture'] ?? null;
+                $_SESSION['last_activity'] = time();
+                $_SESSION['remember'] = $remember;
+                if ($remember) {
+                    $params = session_get_cookie_params();
+                    setcookie(session_name(), session_id(), time() + 2592000, $params['path'], $params['domain'] ?? '', $params['secure'], $params['httponly']);
+                }
+                $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+                header('Location: ' . ($base ?: '/') . '/');
+                exit;
+            }
         }
     }
 }
@@ -58,8 +74,9 @@ $base = $base ?: '/';
             <p>Sign in to manage your platform</p>
         </div>
         <form method="post" class="login-form">
+            <?= csrfField() ?>
             <?php if ($error): ?>
-                <p class="error"><?= escapeHtml($error) ?></p>
+                <p class="login-error"><?= escapeHtml($error) ?></p>
             <?php endif; ?>
             <div class="field">
                 <label for="email">Email</label>
@@ -69,7 +86,12 @@ $base = $base ?: '/';
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password">
             </div>
+            <div class="form-check">
+                <input type="checkbox" name="remember" id="remember" value="1" <?= !empty($_POST['remember']) ? 'checked' : '' ?>>
+                <label for="remember">Remember me</label>
+            </div>
             <button type="submit" class="btn btn-primary">Sign in</button>
+            <p class="login-footer"><a href="<?= $base ?>/forgot-password">Forgot password?</a></p>
         </form>
     </div>
 </body>

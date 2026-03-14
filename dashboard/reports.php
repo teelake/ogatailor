@@ -13,9 +13,20 @@ $methodFilter = $_GET['method'] ?? 'all';
 $methodFilter = in_array($methodFilter, ['all', 'cash', 'transfer', 'pos', 'card', 'other'], true) ? $methodFilter : 'all';
 
 $period = $_GET['period'] ?? '30';
-$period = in_array($period, ['7', '30', '90', 'all'], true) ? $period : '30';
-$days = $period === 'all' ? null : (int)$period;
-$since = $days ? date('Y-m-d', strtotime("-{$days} days")) : null;
+$dateFrom = trim((string)($_GET['date_from'] ?? ''));
+$dateTo = trim((string)($_GET['date_to'] ?? ''));
+$customRange = $dateFrom !== '' && $dateTo !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo) && $dateFrom <= $dateTo;
+if ($customRange) {
+    $since = $dateFrom;
+    $until = $dateTo;
+    $periodLabel = date('M j', strtotime($dateFrom)) . ' – ' . date('M j', strtotime($dateTo));
+} else {
+    $period = in_array($period, ['7', '30', '90', 'all'], true) ? $period : '30';
+    $days = $period === 'all' ? null : (int)$period;
+    $since = $days ? date('Y-m-d', strtotime("-{$days} days")) : null;
+    $until = null;
+    $periodLabel = $period === 'all' ? 'All time' : "Last {$period} days";
+}
 
 $planFilter = $_GET['plan'] ?? 'all';
 $planFilter = in_array($planFilter, ['all', 'starter', 'growth', 'pro'], true) ? $planFilter : 'all';
@@ -31,13 +42,17 @@ $offset = ($page - 1) * $perPage;
 $export = isset($_GET['export']) && $_GET['export'] === 'csv';
 
 $baseParams = ['view' => $view, 'period' => $period, 'plan' => $planFilter, 'q' => $search, 'method' => $methodFilter];
+if ($customRange) {
+    $baseParams['date_from'] = $dateFrom;
+    $baseParams['date_to'] = $dateTo;
+}
 if ($tailorId) $baseParams['tailor_id'] = $tailorId;
 if ($customerId) $baseParams['customer_id'] = $customerId;
 
 $planWhere = $planFilter !== 'all' ? ' AND u.plan_code = :plan' : '';
 $planParam = $planFilter !== 'all' ? [':plan' => $planFilter] : [];
-$sinceWhere = $since ? ' AND u.created_at >= :since' : '';
-$sinceParam = $since ? [':since' => $since] : [];
+$sinceWhere = $since ? ($customRange ? ' AND u.created_at >= :since AND u.created_at <= :until' : ' AND u.created_at >= :since') : '';
+$sinceParam = $since ? ($customRange ? [':since' => $since, ':until' => $until . ' 23:59:59'] : [':since' => $since]) : [];
 $searchWhere = $search !== '' ? ' AND (u.full_name LIKE :q1 OR u.email LIKE :q1 OR u.business_name LIKE :q1)' : '';
 $searchParam = $search !== '' ? [':q1' => '%' . $search . '%'] : [];
 
@@ -48,22 +63,38 @@ $stmt = $pdo->prepare('SELECT COUNT(*) FROM users u WHERE u.is_guest = 0' . $pla
 $stmt->execute($params);
 $totalTailors = (int)$stmt->fetchColumn();
 
-$custWhere = $since ? ' WHERE c.created_at >= :since' : '';
+$custWhere = $since ? ($customRange ? ' WHERE c.created_at >= :since AND c.created_at <= :until' : ' WHERE c.created_at >= :since') : '';
+$custParams = $since ? ($customRange ? [':since' => $since, ':until' => $until . ' 23:59:59'] : [':since' => $since]) : [];
 $stmt = $pdo->prepare('SELECT COUNT(*) FROM customers c' . $custWhere);
-$stmt->execute($since ? [':since' => $since] : []);
+$stmt->execute($custParams);
 $totalCustomers = (int)$stmt->fetchColumn();
 
-$ordWhere = $since ? ' WHERE o.created_at >= :since' : '';
+$ordWhere = $since ? ($customRange ? ' WHERE o.created_at >= :since AND o.created_at <= :until' : ' WHERE o.created_at >= :since') : '';
+$ordParams = $since ? ($customRange ? [':since' => $since, ':until' => $until . ' 23:59:59'] : [':since' => $since]) : [];
 $stmt = $pdo->prepare('SELECT COUNT(*) FROM orders o' . $ordWhere);
-$stmt->execute($since ? [':since' => $since] : []);
+$stmt->execute($ordParams);
 $totalOrders = (int)$stmt->fetchColumn();
 
-$stmt = $pdo->prepare($since ? 'SELECT COALESCE(SUM(amount), 0) FROM payments WHERE paid_at >= :since' : 'SELECT COALESCE(SUM(amount), 0) FROM payments');
-$stmt->execute($since ? [':since' => $since] : []);
+$payWhere = $since ? ($customRange ? ' WHERE paid_at >= :since AND paid_at <= :until' : ' WHERE paid_at >= :since') : '';
+$payParams = $since ? ($customRange ? [':since' => $since, ':until' => $until . ' 23:59:59'] : [':since' => $since]) : [];
+$stmt = $pdo->prepare($since ? 'SELECT COALESCE(SUM(amount), 0) FROM payments' . $payWhere : 'SELECT COALESCE(SUM(amount), 0) FROM payments');
+$stmt->execute($payParams);
 $totalRevenue = (float)$stmt->fetchColumn();
 
 $usersByPlan = $pdo->query('SELECT plan_code, COUNT(*) AS total FROM users WHERE is_guest = 0 GROUP BY plan_code')->fetchAll();
 $orderStatuses = $pdo->query('SELECT status, COUNT(*) AS total FROM orders GROUP BY status')->fetchAll();
+
+// Revenue by day (last 14 days) for chart
+$revenueByDay = [];
+$revStmt = $pdo->prepare(
+    'SELECT DATE(paid_at) AS d, COALESCE(SUM(amount), 0) AS amt FROM payments
+     WHERE paid_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+     GROUP BY DATE(paid_at) ORDER BY d'
+);
+$revStmt->execute();
+foreach ($revStmt->fetchAll(PDO::FETCH_KEY_PAIR) as $d => $amt) {
+    $revenueByDay[$d] = (float)$amt;
+}
 
 // Tailors list (paginated)
 $tailors = [];
@@ -223,11 +254,19 @@ require __DIR__ . '/includes/header.php';
             <div class="filter-group">
                 <label>Period</label>
                 <select name="period" onchange="this.form.submit()" class="form-control">
-                    <option value="7" <?= $period === '7' ? 'selected' : '' ?>>Last 7 days</option>
-                    <option value="30" <?= $period === '30' ? 'selected' : '' ?>>Last 30 days</option>
-                    <option value="90" <?= $period === '90' ? 'selected' : '' ?>>Last 90 days</option>
-                    <option value="all" <?= $period === 'all' ? 'selected' : '' ?>>All time</option>
+                    <option value="7" <?= !$customRange && $period === '7' ? 'selected' : '' ?>>Last 7 days</option>
+                    <option value="30" <?= !$customRange && $period === '30' ? 'selected' : '' ?>>Last 30 days</option>
+                    <option value="90" <?= !$customRange && $period === '90' ? 'selected' : '' ?>>Last 90 days</option>
+                    <option value="all" <?= !$customRange && $period === 'all' ? 'selected' : '' ?>>All time</option>
                 </select>
+            </div>
+            <div class="filter-group">
+                <label>From</label>
+                <input type="date" name="date_from" class="form-control" value="<?= escapeHtml($dateFrom) ?>">
+            </div>
+            <div class="filter-group">
+                <label>To</label>
+                <input type="date" name="date_to" class="form-control" value="<?= escapeHtml($dateTo) ?>">
             </div>
             <div class="filter-group">
                 <label>Plan</label>
@@ -327,6 +366,27 @@ require __DIR__ . '/includes/header.php';
 
 <div class="grid-2">
     <div class="card">
+        <div class="card-title">Revenue (last 14 days)</div>
+        <div class="activity-chart">
+            <?php
+            $maxRev = !empty($revenueByDay) ? max($revenueByDay) : 1;
+            for ($i = 13; $i >= 0; $i--):
+                $d = date('Y-m-d', strtotime("-{$i} days"));
+                $amt = $revenueByDay[$d] ?? 0;
+                $h = $maxRev > 0 ? round(($amt / $maxRev) * 100) : 0;
+            ?>
+            <div class="activity-bar" title="<?= date('M j', strtotime($d)) ?>: ₦<?= number_format($amt, 0) ?>">
+                <span class="activity-fill" style="height:<?= max($h, 2) ?>%"></span>
+            </div>
+            <?php endfor; ?>
+        </div>
+        <div class="activity-labels">
+            <?php for ($i = 13; $i >= 0; $i -= 3): ?>
+            <span><?= date('M j', strtotime("-{$i} days")) ?></span>
+            <?php endfor; ?>
+        </div>
+    </div>
+    <div class="card">
         <div class="card-title">Tailors by plan</div>
         <?php
         $maxPlan = !empty($usersByPlan) ? max(array_column($usersByPlan, 'total')) : 1;
@@ -343,6 +403,8 @@ require __DIR__ . '/includes/header.php';
         <p class="muted">No data</p>
         <?php endif; ?>
     </div>
+</div>
+<div class="grid-2">
     <div class="card">
         <div class="card-title">Order status</div>
         <?php

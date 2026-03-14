@@ -10,6 +10,7 @@ $message = '';
 $messageType = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $action = $_POST['_action'] ?? '';
 
     if ($action === 'profile') {
@@ -113,6 +114,7 @@ require __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-title">Profile picture</div>
         <form method="post" id="avatar-form">
+            <?= csrfField() ?>
             <input type="hidden" name="_action" value="avatar">
             <div class="avatar-upload">
                 <div class="avatar-preview">
@@ -137,6 +139,7 @@ require __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-title">Edit profile</div>
         <form method="post">
+            <?= csrfField() ?>
             <input type="hidden" name="_action" value="profile">
             <div class="form-group">
                 <label>Full name</label>
@@ -154,6 +157,7 @@ require __DIR__ . '/includes/header.php';
 <div class="card">
     <div class="card-title">Change password</div>
     <form method="post" style="max-width: 400px;">
+        <?= csrfField() ?>
         <input type="hidden" name="_action" value="password">
         <div class="form-group">
             <label>Current password</label>

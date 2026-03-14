@@ -27,6 +27,7 @@ $setSetting = function (string $key, string $value) use ($pdo): void {
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $action = $_POST['_action'] ?? '';
 
     if ($action === 'plans') {
@@ -51,6 +52,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':reminders' => $canAdvancedReminders ? 1 : 0,
                 ':code' => $planCode,
             ]);
+            $watermarkInvoices = isset($_POST['watermark_invoices']);
+            $current = array_filter(explode(',', $getSetting('watermark_plans') ?? ''));
+            if ($watermarkInvoices) {
+                $current = array_unique(array_merge($current, [$planCode]));
+            } else {
+                $current = array_values(array_diff($current, [$planCode]));
+            }
+            $setSetting('watermark_plans', implode(',', array_intersect($current, ['starter', 'growth', 'pro'])));
+            adminAuditLog($pdo, 'config_plans', 'plan_settings', $planCode, []);
             $message = 'Plan settings saved.';
             $messageType = 'success';
         }
@@ -61,11 +71,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $setSetting('logo_max_size_kb', (string)($_POST['logo_max_kb'] ?? '500'));
         $setSetting('logo_min_dimension', (string)($_POST['logo_min_dim'] ?? '64'));
         $setSetting('logo_max_dimension', (string)($_POST['logo_max_dim'] ?? '512'));
+        adminAuditLog($pdo, 'config_invoice', null, null, []);
         $message = 'Invoice defaults saved.';
         $messageType = 'success';
     } elseif ($action === 'reminders') {
         $setSetting('reminder_digest_enabled_default', isset($_POST['digest_default']) ? '1' : '0');
         $setSetting('reminder_days_before_due', (string)($_POST['days_before_due'] ?? '3'));
+        adminAuditLog($pdo, 'config_reminders', null, null, []);
         $message = 'Reminder settings saved.';
         $messageType = 'success';
     } elseif ($action === 'watermark') {
@@ -74,19 +86,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $setSetting('watermark_website_url', trim((string)($_POST['watermark_website_url'] ?? 'https://ogatailor.app')));
         $plans = array_intersect((array)($_POST['watermark_plans'] ?? []), ['starter', 'growth', 'pro']);
         $setSetting('watermark_plans', implode(',', $plans));
+        adminAuditLog($pdo, 'config_watermark', null, null, []);
         $message = 'Watermark settings saved.';
         $messageType = 'success';
     } elseif ($action === 'integrations') {
         $setSetting('paystack_test_mode', isset($_POST['paystack_test_mode']) ? '1' : '0');
         $secret = trim((string)($_POST['paystack_secret_key'] ?? ''));
-        if ($secret !== '' && $secret !== '••••••••••••') {
+        if ($secret !== '' && strpos($secret, '••••') === false) {
             $setSetting('paystack_secret_key', $secret);
         }
         $public = trim((string)($_POST['paystack_public_key'] ?? ''));
-        if ($public !== '' && $public !== '••••••••••••') {
+        if ($public !== '' && strpos($public, '••••') === false) {
             $setSetting('paystack_public_key', $public);
         }
+        if (isset($_POST['clear_paystack_secret'])) {
+            $setSetting('paystack_secret_key', '');
+        }
+        if (isset($_POST['clear_paystack_public'])) {
+            $setSetting('paystack_public_key', '');
+        }
+        $setSetting('sms_provider', trim((string)($_POST['sms_provider'] ?? '')));
+        $smsKey = trim((string)($_POST['sms_api_key'] ?? ''));
+        if ($smsKey !== '' && strpos($smsKey, '••••') === false) {
+            $setSetting('sms_api_key', $smsKey);
+        }
+        $setSetting('email_provider', trim((string)($_POST['email_provider'] ?? '')));
+        $emailKey = trim((string)($_POST['email_api_key'] ?? ''));
+        if ($emailKey !== '' && strpos($emailKey, '••••') === false) {
+            $setSetting('email_api_key', $emailKey);
+        }
+        adminAuditLog($pdo, 'config_integrations', null, null, []);
         $message = 'API settings saved.';
+        $messageType = 'success';
+    } elseif ($action === 'platform') {
+        $setSetting('platform_url', trim((string)($_POST['platform_url'] ?? 'https://ogatailor.app')));
+        $setSetting('platform_support_email', trim((string)($_POST['support_email'] ?? '')));
+        $setSetting('platform_support_phone', trim((string)($_POST['support_phone'] ?? '')));
+        $logoData = trim((string)($_POST['platform_logo_data'] ?? ''));
+        $logoUrl = trim((string)($_POST['platform_logo_url'] ?? ''));
+        if (isset($_POST['clear_platform_logo'])) {
+            $setSetting('platform_logo_url', '');
+        } elseif ($logoData !== '' && str_starts_with($logoData, 'data:image/') && strlen($logoData) <= 500 * 1024) {
+            $setSetting('platform_logo_url', $logoData);
+        } elseif ($logoUrl !== '' && (str_starts_with($logoUrl, 'http://') || str_starts_with($logoUrl, 'https://'))) {
+            $setSetting('platform_logo_url', $logoUrl);
+        }
+        adminAuditLog($pdo, 'config_platform', null, null, []);
+        $message = 'Platform settings saved.';
         $messageType = 'success';
     }
 }
@@ -95,6 +141,7 @@ $plans = $pdo->query(
     'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders
      FROM plan_settings ORDER BY FIELD(plan_code, \'starter\', \'growth\', \'pro\')'
 )->fetchAll();
+$watermarkPlans = array_filter(explode(',', $getSetting('watermark_plans') ?? ''));
 
 $pageTitle = 'Configuration';
 require __DIR__ . '/includes/header.php';
@@ -118,11 +165,14 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($tab === 'plans'): ?>
+<p class="muted" style="margin-bottom: 16px;">All mobile app plan features. Customer limit, sync, export, multi-device, reminders, and invoice watermark.</p>
 <div class="grid-3">
     <?php foreach ($plans as $plan): ?>
+    <?php $hasWatermark = in_array($plan['plan_code'], $watermarkPlans, true); ?>
     <div class="card">
         <div class="card-title"><?= escapeHtml(ucfirst($plan['plan_code'])) ?></div>
         <form method="post">
+            <?= csrfField() ?>
             <input type="hidden" name="_action" value="plans">
             <input type="hidden" name="plan_code" value="<?= escapeHtml($plan['plan_code']) ?>">
             <div class="form-group">
@@ -146,6 +196,10 @@ require __DIR__ . '/includes/header.php';
                 <input type="checkbox" name="can_advanced_reminders" id="rem_<?= $plan['plan_code'] ?>" <?= (int)$plan['can_advanced_reminders'] ? 'checked' : '' ?>>
                 <label for="rem_<?= $plan['plan_code'] ?>">Advanced reminders</label>
             </div>
+            <div class="form-check">
+                <input type="checkbox" name="watermark_invoices" id="watermark_<?= $plan['plan_code'] ?>" <?= $hasWatermark ? 'checked' : '' ?>>
+                <label for="watermark_<?= $plan['plan_code'] ?>">Watermark invoices</label>
+            </div>
             <button type="submit" class="btn btn-primary btn-sm">Save</button>
         </form>
     </div>
@@ -157,6 +211,7 @@ require __DIR__ . '/includes/header.php';
     <div class="card-title">Invoice defaults</div>
     <p class="muted" style="margin-bottom: 20px;">Default values for new business profiles. Tailors can override these.</p>
     <form method="post">
+        <?= csrfField() ?>
         <input type="hidden" name="_action" value="invoice">
         <div class="form-group">
             <label>Default currency</label>
@@ -198,6 +253,7 @@ require __DIR__ . '/includes/header.php';
 <div class="card" style="max-width: 500px;">
     <div class="card-title">Reminder settings</div>
     <form method="post">
+        <?= csrfField() ?>
         <input type="hidden" name="_action" value="reminders">
         <div class="form-check">
             <input type="checkbox" name="digest_default" id="digest_default" <?= $getSetting('reminder_digest_enabled_default') === '1' ? 'checked' : '' ?>>
@@ -264,6 +320,8 @@ $watermarkPlans = array_filter(explode(',', $getSetting('watermark_plans') ?? 's
 
 <?php elseif ($tab === 'integrations'): ?>
 <?php
+$base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+$base = $base ?: '/';
 $paystackSecret = $getSetting('paystack_secret_key');
 $paystackPublic = $getSetting('paystack_public_key');
 $paystackTestMode = $getSetting('paystack_test_mode') === '1';
@@ -278,6 +336,7 @@ $maskSecret = fn(?string $s) => $s ? '••••••••••••' . su
     <p class="muted" style="margin-bottom: 20px;">Third-party APIs used platform-wide. Keys are stored securely.</p>
 
     <form method="post">
+        <?= csrfField() ?>
         <input type="hidden" name="_action" value="integrations">
 
         <div class="card-title" style="margin-top: 0; font-size: 15px;">Payments — Paystack</div>
@@ -290,14 +349,48 @@ $maskSecret = fn(?string $s) => $s ? '••••••••••••' . su
             <label>Secret key</label>
             <input type="password" name="paystack_secret_key" class="form-control" autocomplete="new-password"
                 placeholder="<?= $paystackSecret ? $maskSecret($paystackSecret) : 'sk_live_xxxx or sk_test_xxxx' ?>" value="">
-            <?php if ($paystackSecret): ?><span class="muted" style="font-size: 12px;">Leave blank to keep current</span><?php endif; ?>
+            <?php if ($paystackSecret): ?>
+            <div class="form-check">
+                <input type="checkbox" name="clear_paystack_secret" id="clear_secret" value="1">
+                <label for="clear_secret">Clear key</label>
+            </div>
+            <?php else: ?><span class="muted" style="font-size: 12px;">Leave blank to keep current</span><?php endif; ?>
         </div>
         <div class="form-group">
             <label>Public key</label>
             <input type="password" name="paystack_public_key" class="form-control" autocomplete="new-password"
                 placeholder="<?= $paystackPublic ? $maskSecret($paystackPublic) : 'pk_live_xxxx or pk_test_xxxx' ?>" value="">
-            <?php if ($paystackPublic): ?><span class="muted" style="font-size: 12px;">Leave blank to keep current</span><?php endif; ?>
+            <?php if ($paystackPublic): ?>
+            <div class="form-check">
+                <input type="checkbox" name="clear_paystack_public" id="clear_public" value="1">
+                <label for="clear_public">Clear key</label>
+            </div>
+            <?php else: ?><span class="muted" style="font-size: 12px;">Leave blank to keep current</span><?php endif; ?>
         </div>
+        <?php if ($paystackSecret): ?>
+        <div class="form-group">
+            <button type="button" id="test-paystack" class="btn btn-secondary">Test connection</button>
+            <span id="test-result" class="muted" style="margin-left: 8px;"></span>
+        </div>
+        <script>
+        document.getElementById('test-paystack')?.addEventListener('click', async function() {
+            const btn = this;
+            const span = document.getElementById('test-result');
+            btn.disabled = true;
+            span.textContent = 'Testing...';
+            try {
+                const r = await fetch('<?= $base ?>/test-paystack');
+                const d = await r.json();
+                span.textContent = d.ok ? '✓ ' + (d.message || 'OK') : '✗ ' + (d.error || 'Failed');
+                span.style.color = d.ok ? 'var(--accent)' : 'var(--danger)';
+            } catch (e) {
+                span.textContent = '✗ Error';
+                span.style.color = 'var(--danger)';
+            }
+            btn.disabled = false;
+        });
+        </script>
+        <?php endif; ?>
 
         <div class="card-title" style="margin-top: 24px; font-size: 15px;">SMS</div>
         <div class="form-group">
@@ -328,11 +421,48 @@ $maskSecret = fn(?string $s) => $s ? '••••••••••••' . su
 </div>
 
 <?php elseif ($tab === 'platform'): ?>
+<?php
+$platformUrl = $getSetting('platform_url') ?? 'https://ogatailor.app';
+$platformLogo = $getSetting('platform_logo_url');
+?>
 <div class="card" style="max-width: 560px;">
     <div class="card-title">Platform settings</div>
-    <p class="muted" style="margin-bottom: 20px;">General platform-wide configuration.</p>
+    <p class="muted" style="margin-bottom: 20px;">Branding and URLs used by the mobile app and platform.</p>
     <form method="post">
+        <?= csrfField() ?>
         <input type="hidden" name="_action" value="platform">
+        <div class="form-group">
+            <label>Platform URL</label>
+            <input type="url" name="platform_url" class="form-control"
+                value="<?= escapeHtml($platformUrl) ?>" placeholder="https://ogatailor.app">
+            <span class="muted" style="font-size: 12px;">Base URL for API and web. Used by mobile app.</span>
+        </div>
+        <div class="form-group">
+            <label>Platform logo</label>
+            <p class="muted" style="font-size: 12px; margin-bottom: 8px;">Logo shown in mobile app (URL or upload, max 500KB)</p>
+            <?php if ($platformLogo): ?>
+            <div class="avatar-preview" style="width: 80px; height: 80px; margin-bottom: 12px;">
+                <?php if (str_starts_with($platformLogo, 'data:')): ?>
+                <img src="<?= escapeHtml($platformLogo) ?>" alt="Logo">
+                <?php else: ?>
+                <img src="<?= escapeHtml($platformLogo) ?>" alt="Logo" onerror="this.parentElement.innerHTML='Invalid URL'">
+                <?php endif; ?>
+            </div>
+            <div class="form-check">
+                <input type="checkbox" name="clear_platform_logo" id="clear_platform_logo" value="1">
+                <label for="clear_platform_logo">Remove logo</label>
+            </div>
+            <?php endif; ?>
+            <input type="url" name="platform_logo_url" id="platform-logo-url" class="form-control" style="margin-top: 8px;"
+                value="<?= (!empty($platformLogo) && (str_starts_with($platformLogo, 'http://') || str_starts_with($platformLogo, 'https://'))) ? escapeHtml($platformLogo) : '' ?>"
+                placeholder="https://example.com/logo.png">
+            <span class="muted" style="font-size: 12px;">Or upload:</span>
+            <label class="btn btn-secondary btn-sm" style="margin-top: 8px;">
+                Upload image
+                <input type="file" accept="image/*" id="platform-logo-input" style="display:none">
+            </label>
+            <input type="hidden" name="platform_logo_data" id="platform-logo-data" value="">
+        </div>
         <div class="form-group">
             <label>Support email</label>
             <input type="email" name="support_email" class="form-control"
@@ -346,6 +476,30 @@ $maskSecret = fn(?string $s) => $s ? '••••••••••••' . su
         <button type="submit" class="btn btn-primary">Save</button>
     </form>
 </div>
+<script>
+(function() {
+    const urlInput = document.getElementById('platform-logo-url');
+    const dataInput = document.getElementById('platform-logo-data');
+    const fileInput = document.getElementById('platform-logo-input');
+    if (fileInput && dataInput) {
+        fileInput.addEventListener('change', function(e) {
+            const f = e.target.files[0];
+            if (!f || !f.type.startsWith('image/')) return;
+            const r = new FileReader();
+            r.onload = function() {
+                const d = r.result;
+                if (d.length > 500 * 1024) { alert('Image too large (max 500KB)'); return; }
+                dataInput.value = d;
+                if (urlInput) urlInput.value = '';
+            };
+            r.readAsDataURL(f);
+        });
+    }
+    if (urlInput && dataInput) {
+        urlInput.addEventListener('input', function() { dataInput.value = ''; });
+    }
+})();
+</script>
 <?php endif; ?>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>
