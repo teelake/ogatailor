@@ -24,6 +24,7 @@ String _currencySymbol(String currency) {
 Future<Uint8List> buildInvoicePdf(
   Map<String, dynamic> invoice, {
   Dio? dio,
+  Map<String, String>? currencySymbols,
 }) async {
   final pdf = pw.Document();
   final businessName = (invoice['business_name'] ?? '').toString();
@@ -36,7 +37,7 @@ Future<Uint8List> buildInvoicePdf(
   final issuedAt = _formatDate(invoice['issued_at']?.toString());
   final dueAt = _formatDate(invoice['due_at']?.toString());
   final currency = (invoice['currency'] ?? 'NGN').toString();
-  final symbol = _currencySymbol(currency);
+  final symbol = currencySymbols?[currency.toUpperCase()] ?? _currencySymbol(currency);
   final totalAmount = (invoice['total_amount'] ?? 0) as num;
   final items = (invoice['items'] as List<dynamic>?) ?? [];
   final logoBase64 = (invoice['logo_data'] as String?)?.trim();

@@ -409,7 +409,7 @@ if ($method === 'GET' && routeMatches($path, '/api/config')) {
          WHERE setting_key IN (
            'platform_url', 'platform_logo_url', 'platform_support_email', 'platform_support_phone',
            'invoice_default_currency', 'invoice_default_vat_rate', 'invoice_default_payment_terms',
-           'logo_max_size_kb', 'logo_min_dimension', 'logo_max_dimension'
+           'logo_max_size_kb', 'logo_min_dimension', 'logo_max_dimension', 'platform_currencies'
          )"
     );
     $settings = [];
@@ -422,6 +422,29 @@ if ($method === 'GET' && routeMatches($path, '/api/config')) {
     $logoUrl = trim($settings['platform_logo_url'] ?? '');
     $supportEmail = trim($settings['platform_support_email'] ?? '');
     $supportPhone = trim($settings['platform_support_phone'] ?? '');
+    $currenciesRaw = trim($settings['platform_currencies'] ?? '');
+    $currencies = [];
+    if ($currenciesRaw !== '') {
+        $decoded = json_decode($currenciesRaw, true);
+        if (is_array($decoded)) {
+            foreach ($decoded as $c) {
+                if (is_array($c) && !empty($c['code'])) {
+                    $currencies[] = [
+                        'code' => (string)$c['code'],
+                        'symbol' => (string)($c['symbol'] ?? $c['code']),
+                        'name' => (string)($c['name'] ?? $c['code']),
+                    ];
+                }
+            }
+        }
+    }
+    if (empty($currencies)) {
+        $currencies = [
+            ['code' => 'NGN', 'symbol' => '₦', 'name' => 'Nigerian Naira'],
+            ['code' => 'USD', 'symbol' => '$', 'name' => 'US Dollar'],
+            ['code' => 'GBP', 'symbol' => '£', 'name' => 'British Pound'],
+        ];
+    }
     Response::json([
         'platform_url' => $settings['platform_url'] ?? 'https://ogatailor.app',
         'platform_logo_url' => $logoUrl !== '' ? $logoUrl : null,
@@ -437,6 +460,7 @@ if ($method === 'GET' && routeMatches($path, '/api/config')) {
             'min_dimension' => $logoMinDim,
             'max_dimension' => $logoMaxDim,
         ],
+        'currencies' => $currencies,
     ]);
     return;
 }
@@ -934,6 +958,129 @@ if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
             'can_multi_device' => ((int)$settings['can_multi_device']) === 1,
             'can_advanced_reminders' => ((int)$settings['can_advanced_reminders']) === 1,
         ],
+    ]);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/plans')) {
+    $stmt = $pdo->query(
+        "SELECT setting_key, setting_value FROM platform_settings
+         WHERE setting_key IN ('plan_price_growth', 'plan_price_pro')"
+    );
+    $prices = [];
+    while ($row = $stmt->fetch()) {
+        $prices[$row['setting_key']] = (int)($row['setting_value'] ?? 0);
+    }
+    $planPriceGrowth = $prices['plan_price_growth'] ?? 5000;
+    $planPricePro = $prices['plan_price_pro'] ?? 10000;
+
+    $plansStmt = $pdo->query(
+        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, invoices_per_month
+         FROM plan_settings ORDER BY FIELD(plan_code, \'starter\', \'growth\', \'pro\')'
+    );
+    $plans = [];
+    while ($row = $plansStmt->fetch()) {
+        $code = $row['plan_code'];
+        $limit = $row['customer_limit'] !== null ? (int)$row['customer_limit'] : null;
+        $limitLabel = $limit === null ? 'Unlimited' : "Up to {$limit}";
+        $features = ['Basic due-date reminders'];
+        if ($limit !== null && $limit <= 50) $features[] = 'Offline usage';
+        if ((int)$row['can_sync']) $features[] = 'Cloud backup & restore';
+        if ((int)$row['can_export']) $features[] = 'Measurement export';
+        if ((int)$row['can_multi_device']) $features[] = 'Multi-device access';
+        if ((int)$row['can_advanced_reminders']) $features[] = 'Advanced reminder options';
+
+        $priceNgn = 0;
+        if ($code === 'growth') $priceNgn = $planPriceGrowth;
+        elseif ($code === 'pro') $priceNgn = $planPricePro;
+
+        $plans[] = [
+            'plan_code' => $code,
+            'display_name' => ucfirst($code),
+            'customer_limit' => $limit,
+            'customer_limit_label' => $limitLabel,
+            'invoices_per_month' => $row['invoices_per_month'] !== null ? (int)$row['invoices_per_month'] : null,
+            'price_ngn' => $priceNgn,
+            'features' => array_values(array_unique($features)),
+            'can_sync' => ((int)$row['can_sync']) === 1,
+            'can_export' => ((int)$row['can_export']) === 1,
+            'can_multi_device' => ((int)$row['can_multi_device']) === 1,
+            'can_advanced_reminders' => ((int)$row['can_advanced_reminders']) === 1,
+        ];
+    }
+    Response::json(['plans' => $plans]);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/plans/upgrade-initialize')) {
+    $data = requestBody();
+    $planCode = strtolower(trim((string)($data['plan_code'] ?? '')));
+    if (!in_array($planCode, ['growth', 'pro'], true)) {
+        Response::json(['error' => 'plan_code must be growth or pro'], 422);
+        return;
+    }
+
+    $stmt = $pdo->prepare('SELECT setting_value FROM platform_settings WHERE setting_key = :key');
+    $stmt->execute([':key' => 'paystack_secret_key']);
+    $secret = $stmt->fetchColumn();
+    if (!$secret || trim($secret) === '') {
+        Response::json(['error' => 'Payment integration is not configured. Contact support.'], 503);
+        return;
+    }
+
+    $priceKey = $planCode === 'growth' ? 'plan_price_growth' : 'plan_price_pro';
+    $stmt->execute([':key' => $priceKey]);
+    $priceNgn = (int)($stmt->fetchColumn() ?: ($planCode === 'growth' ? 5000 : 10000));
+    $amountKobo = $priceNgn * 100;
+
+    $userId = (string)($authUser['id'] ?? '');
+    $email = trim((string)($authUser['email'] ?? ''));
+    if ($email === '') {
+        Response::json(['error' => 'Email is required for payment. Update your profile.'], 422);
+        return;
+    }
+
+    $baseUrl = rtrim((string)\App\Config\Env::get('APP_URL', 'https://ogatailor.app'), '/');
+    $callbackUrl = $baseUrl . '/upgrade-callback';
+
+    $payload = [
+        'email' => $email,
+        'amount' => $amountKobo,
+        'currency' => 'NGN',
+        'callback_url' => $callbackUrl,
+        'metadata' => [
+            'user_id' => $userId,
+            'plan_code' => $planCode,
+        ],
+    ];
+
+    $ch = curl_init('https://api.paystack.co/transaction/initialize');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($payload),
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $secret,
+            'Content-Type: application/json',
+        ],
+    ]);
+    $res = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $result = json_decode($res, true);
+    if ($code !== 200 || empty($result['status']) || !$result['status']) {
+        $msg = $result['message'] ?? 'Payment initialization failed';
+        error_log('Paystack init failed: ' . $res);
+        Response::json(['error' => $msg], 502);
+        return;
+    }
+
+    $data = $result['data'] ?? [];
+    Response::json([
+        'authorization_url' => $data['authorization_url'] ?? '',
+        'access_code' => $data['access_code'] ?? '',
+        'reference' => $data['reference'] ?? '',
     ]);
     return;
 }

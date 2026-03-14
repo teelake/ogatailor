@@ -18,6 +18,7 @@ import '../../auth/application/auth_controller.dart';
 import '../../customers/application/customers_controller.dart';
 import '../../customers/domain/customer.dart';
 import '../../../core/network/api_client.dart';
+import '../../config/application/config_controller.dart';
 import '../../invoice/data/invoice_repository.dart';
 import '../../invoice/presentation/invoice_pdf_builder.dart';
 import '../../invoice/presentation/invoice_preview_widget.dart';
@@ -1064,18 +1065,23 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
       return;
     }
     if (!context.mounted) return;
+    final config = ref.read(appConfigProvider).valueOrNull;
+    final currencySymbols = config?.currencies != null
+        ? {for (var c in config!.currencies) c.code.toUpperCase(): c.symbol}
+        : null;
     await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => _InvoiceShareSheet(invoice: invoice, dio: ref.read(dioProvider)),
+      builder: (ctx) => _InvoiceShareSheet(invoice: invoice, dio: ref.read(dioProvider), currencySymbols: currencySymbols),
     );
   }
 }
 
 class _InvoiceShareSheet extends StatefulWidget {
-  const _InvoiceShareSheet({required this.invoice, required this.dio});
+  const _InvoiceShareSheet({required this.invoice, required this.dio, this.currencySymbols});
 
   final Map<String, dynamic> invoice;
   final Dio dio;
+  final Map<String, String>? currencySymbols;
 
   @override
   State<_InvoiceShareSheet> createState() => _InvoiceShareSheetState();
@@ -1100,7 +1106,7 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
             const SizedBox(height: 16),
             RepaintBoundary(
               key: _previewKey,
-              child: InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48),
+              child: InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48, currencySymbols: widget.currencySymbols),
             ),
             const SizedBox(height: 24),
             Row(
@@ -1130,7 +1136,7 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
 
   Future<void> _sharePdf(BuildContext context) async {
     try {
-      final bytes = await buildInvoicePdf(invoice, dio: widget.dio);
+      final bytes = await buildInvoicePdf(invoice, dio: widget.dio, currencySymbols: widget.currencySymbols);
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/invoice_${invoice['invoice_number'] ?? 'inv'}.pdf');
       await file.writeAsBytes(bytes);

@@ -282,18 +282,31 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                     const SizedBox(height: 20),
                     Text('Invoice format', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: _currency,
-                      decoration: const InputDecoration(
-                        labelText: 'Currency',
-                        helperText: 'Currency shown on your invoices',
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'NGN', child: Text('NGN (₦)')),
-                        DropdownMenuItem(value: 'USD', child: Text('USD (\$)')),
-                        DropdownMenuItem(value: 'GBP', child: Text('GBP (£)')),
-                      ],
-                      onChanged: (v) => setState(() => _currency = v ?? 'NGN'),
+                    Builder(
+                      builder: (context) {
+                        final configAsync = ref.watch(appConfigProvider);
+                        final currencies = configAsync.valueOrNull?.currencies ?? [
+                          const PlatformCurrency(code: 'NGN', symbol: '₦', name: 'Nigerian Naira'),
+                          const PlatformCurrency(code: 'USD', symbol: '\$', name: 'US Dollar'),
+                          const PlatformCurrency(code: 'GBP', symbol: '£', name: 'British Pound'),
+                        ];
+                        final validCurrency = currencies.any((c) => c.code == _currency);
+                        final value = validCurrency ? _currency : (currencies.isNotEmpty ? currencies.first.code : 'NGN');
+                        if (!validCurrency && currencies.isNotEmpty) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) setState(() => _currency = currencies.first.code);
+                          });
+                        }
+                        return DropdownButtonFormField<String>(
+                          value: value,
+                          decoration: const InputDecoration(
+                            labelText: 'Currency',
+                            helperText: 'Currency shown on your invoices',
+                          ),
+                          items: currencies.map((c) => DropdownMenuItem(value: c.code, child: Text('${c.code} (${c.symbol}) - ${c.name}'))).toList(),
+                          onChanged: (v) => setState(() => _currency = v ?? 'NGN'),
+                        );
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextFormField(

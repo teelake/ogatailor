@@ -11,6 +11,7 @@ class AppConfig {
     this.supportPhone,
     required this.invoiceDefaults,
     required this.logoConstraints,
+    required this.currencies,
   });
 
   final String platformUrl;
@@ -19,6 +20,19 @@ class AppConfig {
   final String? supportPhone;
   final InvoiceDefaults invoiceDefaults;
   final LogoConstraints logoConstraints;
+  final List<PlatformCurrency> currencies;
+}
+
+class PlatformCurrency {
+  const PlatformCurrency({
+    required this.code,
+    required this.symbol,
+    required this.name,
+  });
+
+  final String code;
+  final String symbol;
+  final String name;
 }
 
 class InvoiceDefaults {
@@ -55,6 +69,22 @@ class ConfigRepository {
     final data = Map<String, dynamic>.from(response.data as Map);
     final defaults = (data['invoice_defaults'] ?? {}) as Map;
     final constraints = (data['logo_constraints'] ?? {}) as Map;
+    final currenciesList = (data['currencies'] as List?) ?? [];
+    var currencies = currenciesList.map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      return PlatformCurrency(
+        code: (m['code'] ?? '').toString(),
+        symbol: (m['symbol'] ?? m['code'] ?? '').toString(),
+        name: (m['name'] ?? m['code'] ?? '').toString(),
+      );
+    }).toList();
+    if (currencies.isEmpty) {
+      currencies = [
+        const PlatformCurrency(code: 'NGN', symbol: '₦', name: 'Nigerian Naira'),
+        const PlatformCurrency(code: 'USD', symbol: '\$', name: 'US Dollar'),
+        const PlatformCurrency(code: 'GBP', symbol: '£', name: 'British Pound'),
+      ];
+    }
     return AppConfig(
       platformUrl: (data['platform_url'] ?? 'https://ogatailor.app') as String,
       platformLogoUrl: data['platform_logo_url'] as String?,
@@ -70,6 +100,7 @@ class ConfigRepository {
         minDimension: (constraints['min_dimension'] ?? 64) as int,
         maxDimension: (constraints['max_dimension'] ?? 512) as int,
       ),
+      currencies: currencies,
     );
   }
 }

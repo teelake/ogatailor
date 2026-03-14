@@ -23,6 +23,8 @@ DirectoryIndex index.php
     RewriteRule ^dashboard/404/?$ dashboard/404.php [L]
     RewriteRule ^dashboard/(?!(login|logout|forgot-password|reset-password|profile|reports|configuration|admins|audit-log|test-paystack|404)(/|$))[a-zA-Z0-9_-]+(/.*)?$ dashboard/404.php [L]
 
+    RewriteRule ^upgrade-callback/?$ upgrade-callback.php [L,QSA]
+
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]

@@ -19,15 +19,18 @@ String _currencySymbol(String currency) {
 }
 
 /// Renders invoice for preview and image capture.
+/// [currencySymbols] optional map of currency code -> symbol from platform config.
 class InvoicePreviewWidget extends StatelessWidget {
   const InvoicePreviewWidget({
     super.key,
     required this.invoice,
     this.width = 400,
+    this.currencySymbols,
   });
 
   final Map<String, dynamic> invoice;
   final double width;
+  final Map<String, String>? currencySymbols;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +44,7 @@ class InvoicePreviewWidget extends StatelessWidget {
     final issuedAt = _formatDate(invoice['issued_at']?.toString());
     final dueAt = _formatDate(invoice['due_at']?.toString());
     final currency = (invoice['currency'] ?? 'NGN').toString();
-    final symbol = _currencySymbol(currency);
+    final symbol = currencySymbols?[currency.toUpperCase()] ?? _currencySymbol(currency);
     final totalAmount = (invoice['total_amount'] ?? 0) as num;
     final items = (invoice['items'] as List<dynamic>?) ?? [];
     final logoBase64 = (invoice['logo_data'] as String?)?.trim();

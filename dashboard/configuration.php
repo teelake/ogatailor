@@ -37,6 +37,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $customerLimit = $limit === '' ? null : (int)$limit;
             $invoiceLimit = trim((string)($_POST['invoices_per_month'] ?? ''));
             $invoicesPerMonth = $invoiceLimit === '' ? null : (int)$invoiceLimit;
+            if (in_array($planCode, ['growth', 'pro'], true)) {
+                $priceNgn = trim((string)($_POST['plan_price_ngn'] ?? ''));
+                $setSetting('plan_price_' . $planCode, $priceNgn !== '' ? (string)max(0, (int)$priceNgn) : ($planCode === 'growth' ? '5000' : '10000'));
+            }
             $canSync = isset($_POST['can_sync']);
             $canExport = isset($_POST['can_export']);
             $canMultiDevice = isset($_POST['can_multi_device']);
@@ -71,6 +75,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'invoice') {
         $setSetting('invoice_default_currency', trim((string)($_POST['currency'] ?? 'NGN')));
         $setSetting('invoice_default_vat_rate', trim((string)($_POST['vat_rate'] ?? '7.5')));
+        $currencies = [];
+        foreach ((array)($_POST['currencies'] ?? []) as $c) {
+            if (is_array($c) && !empty(trim((string)($c['code'] ?? '')))) {
+                $currencies[] = [
+                    'code' => strtoupper(trim((string)$c['code'])),
+                    'symbol' => trim((string)($c['symbol'] ?? $c['code'])),
+                    'name' => trim((string)($c['name'] ?? $c['code'])),
+                ];
+            }
+        }
+        if (!empty($currencies)) {
+            $setSetting('platform_currencies', json_encode($currencies, JSON_UNESCAPED_UNICODE));
+        }
         $setSetting('invoice_default_payment_terms', trim((string)($_POST['payment_terms'] ?? '')));
         $setSetting('logo_max_size_kb', (string)($_POST['logo_max_kb'] ?? '500'));
         $setSetting('logo_min_dimension', (string)($_POST['logo_min_dim'] ?? '64'));
@@ -145,6 +162,11 @@ $plans = $pdo->query(
     'SELECT plan_code, customer_limit, invoices_per_month, can_sync, can_export, can_multi_device, can_advanced_reminders
      FROM plan_settings ORDER BY FIELD(plan_code, \'starter\', \'growth\', \'pro\')'
 )->fetchAll();
+$planPrices = [];
+$ppStmt = $pdo->query("SELECT setting_key, setting_value FROM platform_settings WHERE setting_key IN ('plan_price_growth', 'plan_price_pro')");
+while ($row = $ppStmt->fetch()) {
+    $planPrices[$row['setting_key']] = $row['setting_value'];
+}
 $watermarkPlans = array_filter(explode(',', $getSetting('watermark_plans') ?? ''));
 
 $pageTitle = 'Configuration';
@@ -190,6 +212,13 @@ require __DIR__ . '/includes/header.php';
                     value="<?= isset($plan['invoices_per_month']) && $plan['invoices_per_month'] !== null ? (int)$plan['invoices_per_month'] : '' ?>">
                 <span class="muted" style="font-size: 12px;">Soft limit. Leave blank for unlimited.</span>
             </div>
+            <?php if (in_array($plan['plan_code'], ['growth', 'pro'], true)): ?>
+            <div class="form-group">
+                <label>Price (NGN/month)</label>
+                <input type="number" name="plan_price_ngn" class="form-control" min="0" placeholder="<?= $plan['plan_code'] === 'growth' ? '5000' : '10000' ?>"
+                    value="<?= (int)($planPrices['plan_price_' . $plan['plan_code']] ?? ($plan['plan_code'] === 'growth' ? 5000 : 10000)) ?>">
+            </div>
+            <?php endif; ?>
             <div class="form-check">
                 <input type="checkbox" name="can_sync" id="sync_<?= $plan['plan_code'] ?>" <?= (int)$plan['can_sync'] ? 'checked' : '' ?>>
                 <label for="sync_<?= $plan['plan_code'] ?>">Cloud sync</label>
@@ -217,7 +246,22 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <?php elseif ($tab === 'invoice'): ?>
-<div class="card" style="max-width: 500px;">
+<?php
+$currenciesJson = $getSetting('platform_currencies') ?? '';
+$currenciesList = [];
+if ($currenciesJson !== '') {
+    $dec = json_decode($currenciesJson, true);
+    if (is_array($dec)) $currenciesList = $dec;
+}
+if (empty($currenciesList)) {
+    $currenciesList = [
+        ['code' => 'NGN', 'symbol' => '₦', 'name' => 'Nigerian Naira'],
+        ['code' => 'USD', 'symbol' => '$', 'name' => 'US Dollar'],
+        ['code' => 'GBP', 'symbol' => '£', 'name' => 'British Pound'],
+    ];
+}
+?>
+<div class="card" style="max-width: 640px;">
     <div class="card-title">Invoice defaults</div>
     <p class="muted" style="margin-bottom: 20px;">Default values for new business profiles. Tailors can override these.</p>
     <form method="post">
@@ -225,7 +269,13 @@ require __DIR__ . '/includes/header.php';
         <input type="hidden" name="_action" value="invoice">
         <div class="form-group">
             <label>Default currency</label>
-            <input type="text" name="currency" class="form-control" value="<?= escapeHtml($getSetting('invoice_default_currency') ?? 'NGN') ?>" placeholder="NGN">
+            <select name="currency" class="form-control">
+                <?php foreach ($currenciesList as $c): ?>
+                <option value="<?= escapeHtml($c['code'] ?? '') ?>" <?= ($getSetting('invoice_default_currency') ?? 'NGN') === ($c['code'] ?? '') ? 'selected' : '' ?>>
+                    <?= escapeHtml(($c['code'] ?? '') . ' (' . ($c['symbol'] ?? '') . ') - ' . ($c['name'] ?? '')) ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
         </div>
         <div class="form-group">
             <label>Default VAT rate (%)</label>
@@ -237,6 +287,30 @@ require __DIR__ . '/includes/header.php';
             <input type="text" name="payment_terms" class="form-control"
                 value="<?= escapeHtml($getSetting('invoice_default_payment_terms') ?? '') ?>" placeholder="Payment due within 7 days">
         </div>
+        <div class="card-title" style="margin-top: 24px;">Platform currencies</div>
+        <p class="muted" style="margin-bottom: 12px; font-size: 13px;">Currencies available in the mobile app invoice setup. Add, edit, or remove as needed.</p>
+        <div id="currencies-list">
+            <?php foreach ($currenciesList as $i => $c): ?>
+            <div class="form-row currency-row" style="margin-bottom: 12px; align-items: flex-end;">
+                <div class="form-group" style="flex: 0 0 100px;">
+                    <label>Code</label>
+                    <input type="text" name="currencies[<?= $i ?>][code]" class="form-control" value="<?= escapeHtml($c['code'] ?? '') ?>" placeholder="NGN" maxlength="6">
+                </div>
+                <div class="form-group" style="flex: 0 0 80px;">
+                    <label>Symbol</label>
+                    <input type="text" name="currencies[<?= $i ?>][symbol]" class="form-control" value="<?= escapeHtml($c['symbol'] ?? '') ?>" placeholder="₦" maxlength="4">
+                </div>
+                <div class="form-group" style="flex: 1; min-width: 140px;">
+                    <label>Name</label>
+                    <input type="text" name="currencies[<?= $i ?>][name]" class="form-control" value="<?= escapeHtml($c['name'] ?? '') ?>" placeholder="Nigerian Naira">
+                </div>
+                <div class="form-group" style="flex: 0 0 auto;">
+                    <button type="button" class="btn btn-secondary btn-sm remove-currency" title="Remove">×</button>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <button type="button" id="add-currency" class="btn btn-secondary btn-sm" style="margin-bottom: 20px;">+ Add currency</button>
         <div class="card-title" style="margin-top: 24px;">Logo validation</div>
         <div class="form-row">
             <div class="form-group">
@@ -258,6 +332,29 @@ require __DIR__ . '/includes/header.php';
         <button type="submit" class="btn btn-primary">Save</button>
     </form>
 </div>
+<script>
+(function() {
+    const list = document.getElementById('currencies-list');
+    const addBtn = document.getElementById('add-currency');
+    if (!list || !addBtn) return;
+    let nextIdx = list.querySelectorAll('.currency-row').length;
+    addBtn.addEventListener('click', function() {
+        const row = document.createElement('div');
+        row.className = 'form-row currency-row';
+        row.style.cssText = 'margin-bottom: 12px; align-items: flex-end;';
+        row.innerHTML = '<div class="form-group" style="flex: 0 0 100px;"><label>Code</label><input type="text" name="currencies[' + nextIdx + '][code]" class="form-control" placeholder="NGN" maxlength="6"></div>' +
+            '<div class="form-group" style="flex: 0 0 80px;"><label>Symbol</label><input type="text" name="currencies[' + nextIdx + '][symbol]" class="form-control" placeholder="₦" maxlength="4"></div>' +
+            '<div class="form-group" style="flex: 1; min-width: 140px;"><label>Name</label><input type="text" name="currencies[' + nextIdx + '][name]" class="form-control" placeholder="Currency name"></div>' +
+            '<div class="form-group" style="flex: 0 0 auto;"><button type="button" class="btn btn-secondary btn-sm remove-currency" title="Remove">×</button></div>';
+        list.appendChild(row);
+        nextIdx++;
+        row.querySelector('.remove-currency').addEventListener('click', function() { row.remove(); });
+    });
+    list.querySelectorAll('.remove-currency').forEach(function(btn) {
+        btn.addEventListener('click', function() { btn.closest('.currency-row').remove(); });
+    });
+})();
+</script>
 
 <?php elseif ($tab === 'reminders'): ?>
 <div class="card" style="max-width: 500px;">
