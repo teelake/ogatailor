@@ -221,13 +221,15 @@ require __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-title">Order status (all time)</div>
         <?php
+        $statusColors = ['pending' => '#f59e0b', 'in_progress' => '#3b82f6', 'ready' => '#10b981', 'delivered' => '#8b5cf6', 'cancelled' => '#6b7280'];
         $maxStatus = !empty($orderStatuses) ? max(array_column($orderStatuses, 'total')) : 1;
         foreach ($orderStatuses as $row):
             $pct = $maxStatus > 0 ? round((int)$row['total'] / $maxStatus * 100) : 0;
+            $color = $statusColors[$row['status']] ?? '#6b7280';
         ?>
         <div class="bar">
             <span><?= escapeHtml(ucfirst(str_replace('_', ' ', $row['status']))) ?></span>
-            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%"></span></span>
+            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%; background:<?= $color ?>"></span></span>
             <span><?= (int)$row['total'] ?></span>
         </div>
         <?php endforeach; ?>
@@ -239,13 +241,15 @@ require __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-title">Tailors by plan</div>
         <?php
+        $planColors = ['starter' => '#3b82f6', 'growth' => '#10b981', 'pro' => '#8b5cf6'];
         $maxPlan = !empty($usersByPlan) ? max(array_column($usersByPlan, 'total')) : 1;
         foreach ($usersByPlan as $row):
             $pct = $maxPlan > 0 ? round((int)$row['total'] / $maxPlan * 100) : 0;
+            $color = $planColors[$row['plan_code']] ?? '#6b7280';
         ?>
         <div class="bar">
             <span><?= escapeHtml(ucfirst($row['plan_code'])) ?></span>
-            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%"></span></span>
+            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%; background:<?= $color ?>"></span></span>
             <span><?= (int)$row['total'] ?></span>
         </div>
         <?php endforeach; ?>

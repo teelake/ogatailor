@@ -206,6 +206,90 @@ if ($view === 'orders') {
     }
 }
 
+// Payments list
+$payments = [];
+$paymentsTotal = 0;
+$paymentsSum = 0.0;
+if ($view === 'payments') {
+    $payWhere = '1=1';
+    $payParams = [];
+    if ($tailorId) {
+        $payWhere .= ' AND p.owner_user_id = :tid';
+        $payParams[':tid'] = $tailorId;
+    }
+    if ($since) {
+        $payWhere .= $customRange ? ' AND p.paid_at >= :since AND p.paid_at <= :until' : ' AND p.paid_at >= :since';
+        $payParams[':since'] = $since;
+        if ($customRange) $payParams[':until'] = $until . ' 23:59:59';
+    }
+    if ($methodFilter !== 'all') {
+        $payWhere .= ' AND p.method = :method';
+        $payParams[':method'] = $methodFilter;
+    }
+    $paySql = "SELECT p.id, p.amount, p.method, p.reference_code, p.paid_at, u.full_name AS tailor_name, i.invoice_number
+               FROM payments p INNER JOIN users u ON u.id = p.owner_user_id
+               INNER JOIN invoices i ON i.id = p.invoice_id WHERE {$payWhere}";
+    $countSql = "SELECT COUNT(*), COALESCE(SUM(p.amount), 0) FROM payments p WHERE {$payWhere}";
+    $stmt = $pdo->prepare($countSql);
+    $stmt->execute($payParams);
+    $row = $stmt->fetch(PDO::FETCH_NUM);
+    $paymentsTotal = (int)$row[0];
+    $paymentsSum = (float)$row[1];
+    $stmt = $pdo->prepare($paySql . ' ORDER BY p.paid_at DESC LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset);
+    $stmt->execute($payParams);
+    $payments = $stmt->fetchAll();
+    if ($export && $paymentsTotal > 0) {
+        $stmt = $pdo->prepare($paySql . ' ORDER BY p.paid_at DESC');
+        $stmt->execute($payParams);
+        $exportRows = $stmt->fetchAll();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="payments-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Tailor', 'Amount', 'Method', 'Reference', 'Invoice', 'Paid at']);
+        foreach ($exportRows as $p) {
+            fputcsv($out, [$p['tailor_name'] ?? '', $p['amount'], $p['method'], $p['reference_code'] ?? '', $p['invoice_number'] ?? '', $p['paid_at']]);
+        }
+        fclose($out);
+        exit;
+    }
+}
+
+// Subscriptions list (tailors by plan with expiry)
+$subscriptions = [];
+$subscriptionsTotal = 0;
+if ($view === 'subscriptions') {
+    $subWhere = 'u.is_guest = 0';
+    $subParams = [];
+    if ($planFilter !== 'all') {
+        $subWhere .= ' AND u.plan_code = :plan';
+        $subParams[':plan'] = $planFilter;
+    }
+    $subSql = "SELECT u.id, u.full_name, u.email, u.plan_code, u.plan_expires_at, u.created_at,
+               (SELECT COUNT(*) FROM customers c WHERE c.owner_user_id = u.id) AS cust_count
+               FROM users u WHERE {$subWhere} ORDER BY u.full_name";
+    $countSql = "SELECT COUNT(*) FROM users u WHERE {$subWhere}";
+    $stmt = $pdo->prepare($countSql);
+    $stmt->execute($subParams);
+    $subscriptionsTotal = (int)$stmt->fetchColumn();
+    $stmt = $pdo->prepare($subSql . ' LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset);
+    $stmt->execute($subParams);
+    $subscriptions = $stmt->fetchAll();
+    if ($export && $subscriptionsTotal > 0) {
+        $stmt = $pdo->prepare($subSql);
+        $stmt->execute($subParams);
+        $exportRows = $stmt->fetchAll();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="subscriptions-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Tailor', 'Email', 'Plan', 'Expires', 'Customers', 'Joined']);
+        foreach ($exportRows as $s) {
+            fputcsv($out, [$s['full_name'], $s['email'] ?? '', $s['plan_code'], $s['plan_expires_at'] ?? '', $s['cust_count'], $s['created_at']]);
+        }
+        fclose($out);
+        exit;
+    }
+}
+
 // Pagination
 $totalRows = match ($view) {
     'tailors' => $tailorsTotal,
@@ -389,13 +473,15 @@ require __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-title">Tailors by plan</div>
         <?php
+        $planColors = ['starter' => '#3b82f6', 'growth' => '#10b981', 'pro' => '#8b5cf6'];
         $maxPlan = !empty($usersByPlan) ? max(array_column($usersByPlan, 'total')) : 1;
         foreach ($usersByPlan as $row):
             $pct = $maxPlan > 0 ? round((int)$row['total'] / $maxPlan * 100) : 0;
+            $color = $planColors[$row['plan_code']] ?? '#6b7280';
         ?>
         <div class="bar">
             <span><?= escapeHtml(ucfirst($row['plan_code'])) ?></span>
-            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%"></span></span>
+            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%; background:<?= $color ?>"></span></span>
             <span><?= (int)$row['total'] ?></span>
         </div>
         <?php endforeach; ?>
@@ -408,13 +494,15 @@ require __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-title">Order status</div>
         <?php
+        $statusColors = ['pending' => '#f59e0b', 'in_progress' => '#3b82f6', 'ready' => '#10b981', 'delivered' => '#8b5cf6', 'cancelled' => '#6b7280'];
         $maxStatus = !empty($orderStatuses) ? max(array_column($orderStatuses, 'total')) : 1;
         foreach ($orderStatuses as $row):
             $pct = $maxStatus > 0 ? round((int)$row['total'] / $maxStatus * 100) : 0;
+            $color = $statusColors[$row['status']] ?? '#6b7280';
         ?>
         <div class="bar">
             <span><?= escapeHtml(ucfirst(str_replace('_', ' ', $row['status']))) ?></span>
-            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%"></span></span>
+            <span class="bar-fill-wrap"><span class="bar-fill" style="width:<?= $pct ?>%; background:<?= $color ?>"></span></span>
             <span><?= (int)$row['total'] ?></span>
         </div>
         <?php endforeach; ?>
