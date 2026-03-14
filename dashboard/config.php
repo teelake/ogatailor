@@ -41,7 +41,21 @@ function adminUser(): ?array
         'id' => $_SESSION['admin_id'],
         'email' => $_SESSION['admin_email'] ?? '',
         'full_name' => $_SESSION['admin_name'] ?? '',
+        'profile_picture' => $_SESSION['admin_profile_picture'] ?? null,
     ];
+}
+
+function refreshAdminSession(\PDO $pdo): void
+{
+    if (!adminLoggedIn()) return;
+    $stmt = $pdo->prepare('SELECT full_name, email, profile_picture FROM admin_users WHERE id = :id');
+    $stmt->execute([':id' => $_SESSION['admin_id']]);
+    $row = $stmt->fetch();
+    if ($row) {
+        $_SESSION['admin_name'] = $row['full_name'];
+        $_SESSION['admin_email'] = $row['email'];
+        $_SESSION['admin_profile_picture'] = $row['profile_picture'];
+    }
 }
 
 function escapeHtml(string $s): string

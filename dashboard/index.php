@@ -33,9 +33,9 @@ $pageTitle = 'Overview';
 require __DIR__ . '/includes/header.php';
 ?>
 
-<header class="topbar">
-    <h2>Overview</h2>
-</header>
+<div class="page-header">
+    <h1>Overview</h1>
+</div>
 
 <div class="stats-grid">
     <article class="stat-card">
@@ -56,9 +56,9 @@ require __DIR__ . '/includes/header.php';
     </article>
 </div>
 
-<div class="cards-grid">
-    <article class="card">
-        <h3>Order Status Breakdown</h3>
+<div class="grid-2">
+    <div class="card">
+        <div class="card-title">Order Status Breakdown</div>
         <?php
         $maxStatus = !empty($orderStatuses) ? max(array_column($orderStatuses, 'total')) : 1;
         foreach ($orderStatuses as $row):
@@ -73,10 +73,10 @@ require __DIR__ . '/includes/header.php';
         <?php if (empty($orderStatuses)): ?>
         <p class="muted">No orders yet</p>
         <?php endif; ?>
-    </article>
-    <article class="card">
-        <div class="card-header">
-            <h3>Upcoming Due Orders</h3>
+    </div>
+    <div class="card">
+        <div class="card-title">Upcoming Due Orders</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
             <form method="get" class="inline-form">
                 <select name="upcoming_limit" onchange="this.form.submit()">
                     <option value="8" <?= $upcomingLimit === 8 ? 'selected' : '' ?>>8</option>
@@ -89,7 +89,7 @@ require __DIR__ . '/includes/header.php';
             <?php foreach ($upcomingOrders as $o): ?>
             <li>
                 <strong><?= escapeHtml($o['title'] ?? 'Order') ?></strong> — <?= escapeHtml($o['customer_name'] ?? '-') ?>
-                <span class="pill"><?= escapeHtml($o['status'] ?? 'pending') ?></span>
+                <span class="pill pill-success"><?= escapeHtml($o['status'] ?? 'pending') ?></span>
                 (due <?= $o['due_date'] ? date('M j, Y', strtotime($o['due_date'])) : '-' ?>)
             </li>
             <?php endforeach; ?>
@@ -97,7 +97,7 @@ require __DIR__ . '/includes/header.php';
         <?php if (empty($upcomingOrders)): ?>
         <p class="muted">No upcoming due orders</p>
         <?php endif; ?>
-    </article>
+    </div>
 </div>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>

@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Email and password are required.';
     } else {
         $stmt = $pdo->prepare(
-            'SELECT id, email, full_name, password_hash FROM admin_users WHERE email = :email LIMIT 1'
+            'SELECT id, email, full_name, password_hash, profile_picture FROM admin_users WHERE email = :email LIMIT 1'
         );
         $stmt->execute([':email' => $email]);
         $admin = $stmt->fetch();
@@ -30,6 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['admin_id'] = $admin['id'];
             $_SESSION['admin_email'] = $admin['email'];
             $_SESSION['admin_name'] = $admin['full_name'];
+            $_SESSION['admin_profile_picture'] = $admin['profile_picture'] ?? null;
             header('Location: index.php');
             exit;
         }
