@@ -96,21 +96,22 @@ foreach ($revStmt->fetchAll(PDO::FETCH_KEY_PAIR) as $d => $amt) {
     $revenueByDay[$d] = (float)$amt;
 }
 
-// Tailors list (paginated)
+// Tailors list (paginated) - uses plan + search only (no date filter in this view)
 $tailors = [];
 $tailorsTotal = 0;
 if ($view === 'tailors') {
+    $tailorsParams = array_merge($planParam, $searchParam);
     $sql = 'SELECT u.id, u.full_name, u.email, u.business_name, u.plan_code, u.created_at,
             (SELECT COUNT(*) FROM customers c WHERE c.owner_user_id = u.id) AS cust_count,
             (SELECT COUNT(*) FROM orders o WHERE o.owner_user_id = u.id) AS order_count
             FROM users u WHERE u.is_guest = 0' . $planWhere . $searchWhere . ' ORDER BY u.created_at DESC';
     $countSql = 'SELECT COUNT(*) FROM users u WHERE u.is_guest = 0' . $planWhere . $searchWhere;
     $stmt = $pdo->prepare($countSql);
-    $stmt->execute($params);
+    $stmt->execute($tailorsParams);
     $tailorsTotal = (int)$stmt->fetchColumn();
     $limit = $export ? '' : ' LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset;
     $stmt = $pdo->prepare($sql . $limit);
-    $stmt->execute($params);
+    $stmt->execute($tailorsParams);
     $tailors = $stmt->fetchAll();
     if ($export) {
         header('Content-Type: text/csv; charset=utf-8');
