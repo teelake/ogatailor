@@ -52,24 +52,22 @@ class _MainShellState extends ConsumerState<MainShell> {
               child: SafeArea(
                 bottom: false,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline_rounded, size: 20, color: AppColors.primary),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Create an account to save your data',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.primaryDark,
-                                fontWeight: FontWeight.w500,
-                              ),
-                        ),
-                      ),
                       TextButton(
                         onPressed: () => showAuthSheet(context, mode: AuthSheetMode.register),
-                        child: const Text('Sign up'),
+                        child: const Text('Create account'),
                       ),
+                      const Spacer(),
+                      Text(
+                        'Save your data',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.primaryDark,
+                              fontWeight: FontWeight.w500,
+                            ),
+                      ),
+                      const Spacer(),
                       TextButton(
                         onPressed: () => showAuthSheet(context, mode: AuthSheetMode.login),
                         child: const Text('Sign in'),

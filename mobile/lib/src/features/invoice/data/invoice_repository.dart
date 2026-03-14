@@ -52,23 +52,23 @@ class InvoiceRepository {
     double defaultVatRate = 0,
     String currency = 'NGN',
     String? paymentTerms,
+    String? logoData,
   }) async {
-    await _dio.patch(
-      '/api/business-profile',
-      data: {
-        'business_name': businessName,
-        'business_phone': businessPhone,
-        'business_email': businessEmail,
-        'business_address': businessAddress,
-        'cac_registered': cacRegistered,
-        'cac_registration_type': cacRegistrationType,
-        'cac_number': cacNumber,
-        'vat_enabled': vatEnabled,
-        'default_vat_rate': defaultVatRate,
-        'currency': currency,
-        'payment_terms': paymentTerms,
-      },
-    );
+    final payload = <String, dynamic>{
+      'business_name': businessName,
+      'business_phone': businessPhone,
+      'business_email': businessEmail,
+      'business_address': businessAddress,
+      'cac_registered': cacRegistered,
+      'cac_registration_type': cacRegistrationType,
+      'cac_number': cacNumber,
+      'vat_enabled': vatEnabled,
+      'default_vat_rate': defaultVatRate,
+      'currency': currency,
+      'payment_terms': paymentTerms,
+      'logo_data': logoData,
+    };
+    await _dio.patch('/api/business-profile', data: payload);
   }
 }
 

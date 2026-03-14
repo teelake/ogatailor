@@ -7,6 +7,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/sync/offline_sync_service.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../../../core/utils/error_message.dart';
+import '../../auth/application/auth_controller.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/domain/plan_summary.dart';
 import '../application/customers_controller.dart';
@@ -54,6 +55,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   Widget build(BuildContext context) {
     final planSummaryAsync = ref.watch(planSummaryProvider);
     final syncStatusAsync = ref.watch(syncStatusProvider);
+    final isGuest = ref.watch(authControllerProvider).valueOrNull?.mode == 'guest';
 
     return Scaffold(
       appBar: AppBar(
@@ -77,7 +79,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         label: const Text('Add Customer'),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, isGuest ? 88 : 16),
         child: Column(
           children: [
             _PlanUsageBanner(summaryAsync: planSummaryAsync),

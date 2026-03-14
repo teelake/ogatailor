@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -42,6 +44,7 @@ class InvoicePreviewWidget extends StatelessWidget {
     final symbol = _currencySymbol(currency);
     final totalAmount = (invoice['total_amount'] ?? 0) as num;
     final items = (invoice['items'] as List<dynamic>?) ?? [];
+    final logoBase64 = (invoice['logo_data'] as String?)?.trim();
 
     return Container(
       width: width,
@@ -51,15 +54,27 @@ class InvoicePreviewWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('INVOICE', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 20),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (logoBase64 != null && logoBase64.isNotEmpty) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    base64Decode(logoBase64),
+                    width: 56,
+                    height: 56,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(width: 16),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('INVOICE', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
                     Text(businessName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                     if (businessAddress.isNotEmpty) Text(businessAddress, style: const TextStyle(fontSize: 10)),
                     if (businessPhone.isNotEmpty) Text(businessPhone, style: const TextStyle(fontSize: 10)),

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
@@ -34,6 +35,14 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> invoice) async {
   final symbol = _currencySymbol(currency);
   final totalAmount = (invoice['total_amount'] ?? 0) as num;
   final items = (invoice['items'] as List<dynamic>?) ?? [];
+  final logoBase64 = (invoice['logo_data'] as String?)?.trim();
+  pw.ImageProvider? logoImage;
+  if (logoBase64 != null && logoBase64.isNotEmpty) {
+    try {
+      final bytes = base64Decode(logoBase64.replaceAll(RegExp(r'\s'), ''));
+      logoImage = pw.MemoryImage(bytes);
+    } catch (_) {}
+  }
 
   pdf.addPage(
     pw.Page(
@@ -43,15 +52,22 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> invoice) async {
         return pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text('INVOICE', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
-            pw.SizedBox(height: 20),
             pw.Row(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
+                if (logoImage != null)
+                  pw.Container(
+                    width: 56,
+                    height: 56,
+                    margin: const pw.EdgeInsets.only(right: 16),
+                    child: pw.Image(logoImage!, fit: pw.BoxFit.contain),
+                  ),
                 pw.Expanded(
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
+                      pw.Text('INVOICE', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                      pw.SizedBox(height: 4),
                       pw.Text(businessName, style: const pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
                       if (businessAddress.isNotEmpty) pw.Text(businessAddress, style: const pw.TextStyle(fontSize: 10)),
                       if (businessPhone.isNotEmpty) pw.Text(businessPhone, style: const pw.TextStyle(fontSize: 10)),
@@ -64,6 +80,7 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> invoice) async {
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
                       pw.Text('Invoice #$invoiceNumber', style: const pw.TextStyle(fontSize: 12)),
+                      pw.SizedBox(height: 4),
                       pw.Text('Issued: $issuedAt', style: const pw.TextStyle(fontSize: 10)),
                       pw.Text('Due: $dueAt', style: const pw.TextStyle(fontSize: 10)),
                     ],

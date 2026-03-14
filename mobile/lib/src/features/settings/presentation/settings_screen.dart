@@ -114,7 +114,7 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
           _SettingsSection(
-            title: 'Danger Zone',
+            title: 'Session',
             children: [
               _SettingsTile(
                 icon: Icons.logout_rounded,

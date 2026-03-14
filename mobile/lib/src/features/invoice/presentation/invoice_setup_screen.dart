@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/utils/error_message.dart';
 import '../data/invoice_repository.dart';
+import '../domain/logo_validator.dart';
 
 final _cacRegex = RegExp(r'^(BN|RC)\d+$', caseSensitive: false);
 
@@ -30,6 +34,8 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
   bool _showAdvancedOptions = false;
   String _cacType = 'company';
   String _currency = 'NGN';
+  String? _logoBase64;
+  String? _logoError;
 
   @override
   void initState() {
@@ -64,6 +70,8 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
         _vatRateController.text = ((profile['default_vat_rate'] ?? 0) as num).toString();
         _currency = (profile['currency'] ?? 'NGN').toString();
         _paymentTermsController.text = (profile['payment_terms'] ?? 'Due on receipt').toString();
+        _logoBase64 = (profile['logo_data'] as String?)?.trim();
+        if (_logoBase64 != null && _logoBase64!.isEmpty) _logoBase64 = null;
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
@@ -88,6 +96,23 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                     ),
                     const SizedBox(height: 20),
                     Text('Basic info', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
+                    const SizedBox(height: 12),
+                    _LogoUploadField(
+                      logoBase64: _logoBase64,
+                      error: _logoError,
+                      onPicked: (base64) {
+                        setState(() {
+                          _logoBase64 = base64;
+                          _logoError = null;
+                        });
+                      },
+                      onRemove: () {
+                        setState(() {
+                          _logoBase64 = null;
+                          _logoError = null;
+                        });
+                      },
+                    ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _businessNameController,
@@ -276,6 +301,11 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                           : () async {
                               if (!_formKey.currentState!.validate()) return;
                               setState(() => _saving = true);
+                              _logoError = _logoBase64 != null ? LogoValidation.validateBase64(_logoBase64!) : null;
+                              if (_logoError != null) {
+                                setState(() {});
+                                return;
+                              }
                               try {
                                 await ref.read(invoiceRepositoryProvider).saveBusinessProfile(
                                       businessName: _businessNameController.text.trim(),
@@ -303,6 +333,7 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                                       paymentTerms: _paymentTermsController.text.trim().isEmpty
                                           ? null
                                           : _paymentTermsController.text.trim(),
+                                      logoData: _logoBase64,
                                     );
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -331,6 +362,166 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
                 ),
               ),
             ),
+    );
+  }
+}
+
+class _LogoUploadField extends StatelessWidget {
+  const _LogoUploadField({
+    required this.logoBase64,
+    required this.error,
+    required this.onPicked,
+    required this.onRemove,
+  });
+
+  final String? logoBase64;
+  final String? error;
+  final ValueChanged<String> onPicked;
+  final VoidCallback onRemove;
+
+  static const _maxSizeBytes = 512 * 1024;
+  static const _minDim = 64;
+  static const _maxDim = 512;
+
+  Future<void> _pickImage(BuildContext context, ImageSource source) async {
+    final picker = ImagePicker();
+    final xFile = await picker.pickImage(
+      source: source,
+      maxWidth: _maxDim.toDouble(),
+      maxHeight: _maxDim.toDouble(),
+      imageQuality: 90,
+    );
+    if (xFile == null || !context.mounted) return;
+    final bytes = await xFile.readAsBytes();
+    if (bytes.length > _maxSizeBytes) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Image must be under 500KB (current: ${(bytes.length / 1024).toStringAsFixed(0)}KB)')),
+        );
+      }
+      return;
+    }
+    final err = LogoValidation.validate(bytes);
+    if (err != null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+      }
+      return;
+    }
+    onPicked(base64Encode(bytes));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Brand logo',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'PNG, JPEG or WEBP. 64–512px, max 500KB. Shown at top of invoices.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            if (logoBase64 != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  base64Decode(logoBase64!),
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => showModalBottomSheet<void>(
+                      context: context,
+                      builder: (ctx) => SafeArea(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ListTile(
+                              leading: const Icon(Icons.photo_library_rounded),
+                              title: const Text('Gallery'),
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _pickImage(context, ImageSource.gallery);
+                              },
+                            ),
+                            ListTile(
+                              leading: const Icon(Icons.camera_alt_rounded),
+                              title: const Text('Camera'),
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _pickImage(context, ImageSource.camera);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: const Text('Change'),
+                  ),
+                  TextButton.icon(
+                    onPressed: onRemove,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text('Remove'),
+                  ),
+                ],
+              ),
+            ] else
+              OutlinedButton.icon(
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  builder: (ctx) => SafeArea(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.photo_library_rounded),
+                          title: const Text('Gallery'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _pickImage(context, ImageSource.gallery);
+                          },
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.camera_alt_rounded),
+                          title: const Text('Camera'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _pickImage(context, ImageSource.camera);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.add_photo_alternate_rounded),
+                label: const Text('Upload logo'),
+              ),
+          ],
+        ),
+        if (error != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+          ),
+        ],
+      ],
     );
   }
 }

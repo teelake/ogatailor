@@ -2,6 +2,9 @@ import 'package:dio/dio.dart';
 
 String userFriendlyError(Object error, {String fallback = 'Something went wrong. Please try again.'}) {
   if (error is DioException) {
+    if (error.error is FormatException) {
+      return 'Invalid response from server. Please try again.';
+    }
     final statusCode = error.response?.statusCode;
     if (error.type == DioExceptionType.connectionTimeout ||
         error.type == DioExceptionType.sendTimeout ||
@@ -34,6 +37,10 @@ String userFriendlyError(Object error, {String fallback = 'Something went wrong.
         return _normalizeMessage(message);
       }
     }
+  }
+
+  if (error is FormatException) {
+    return 'Invalid response from server. Please try again.';
   }
 
   final raw = error.toString().trim();
