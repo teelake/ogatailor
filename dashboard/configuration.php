@@ -22,8 +22,8 @@ $setSetting = function (string $key, string $value) use ($pdo): void {
     $pdo->prepare(
         'INSERT INTO platform_settings (setting_key, setting_value, updated_at)
          VALUES (:key, :val, NOW())
-         ON DUPLICATE KEY UPDATE setting_value = :val, updated_at = NOW()'
-    )->execute([':key' => $key, ':val' => $value]);
+         ON DUPLICATE KEY UPDATE setting_value = :val2, updated_at = NOW()'
+    )->execute([':key' => $key, ':val' => $value, ':val2' => $value]);
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
