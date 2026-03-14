@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/error_message.dart';
+import '../../../core/utils/format_amount.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../customers/application/customers_controller.dart';
@@ -277,7 +278,7 @@ class _OrderCard extends ConsumerWidget {
               const SizedBox(height: 4),
               Text('Customer: ${order.customerName}'),
               const SizedBox(height: 4),
-              Text('Amount: ₦${order.amountTotal.toStringAsFixed(2)}'),
+              Text('Amount: ₦${formatAmount(order.amountTotal)}'),
               if (order.dueDate != null) ...[
                 const SizedBox(height: 4),
                 Text('Due: ${DateFormat('dd MMM yyyy').format(order.dueDate!.toLocal())}'),
@@ -864,7 +865,7 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
                     const SizedBox(height: 6),
                     Text('Customer: ${widget.order.customerName}'),
                     const SizedBox(height: 6),
-                    Text('Amount: ₦${widget.order.amountTotal.toStringAsFixed(2)}'),
+                    Text('Amount: ₦${formatAmount(widget.order.amountTotal)}'),
                     const SizedBox(height: 6),
                     Text(
                       'Due date: ${_dueDate == null ? 'No due date' : DateFormat('dd MMM yyyy').format(_dueDate!.toLocal())}',

@@ -443,7 +443,7 @@ require __DIR__ . '/includes/header.php';
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         </div>
         <div class="analytics-content">
-            <span class="analytics-value">₦<?= number_format($totalRevenue, 0) ?></span>
+            <span class="analytics-value">₦<?= number_format($totalRevenue, 2) ?></span>
             <span class="analytics-label">Revenue</span>
         </div>
     </div>
@@ -460,7 +460,7 @@ require __DIR__ . '/includes/header.php';
                 $amt = $revenueByDay[$d] ?? 0;
                 $h = $maxRev > 0 ? round(($amt / $maxRev) * 100) : 0;
             ?>
-            <div class="activity-bar" title="<?= date('M j', strtotime($d)) ?>: ₦<?= number_format($amt, 0) ?>">
+            <div class="activity-bar" title="<?= date('M j', strtotime($d)) ?>: ₦<?= number_format($amt, 2) ?>">
                 <span class="activity-fill" style="height:<?= max($h, 2) ?>%"></span>
             </div>
             <?php endfor; ?>
@@ -635,7 +635,7 @@ require __DIR__ . '/includes/header.php';
 
 <?php elseif ($view === 'payments'): ?>
 <div class="card">
-    <div class="card-title">Payments (<?= number_format($paymentsTotal) ?>) — Total: ₦<?= number_format($paymentsSum, 0) ?></div>
+    <div class="card-title">Payments (<?= number_format($paymentsTotal) ?>) — Total: ₦<?= number_format($paymentsSum, 2) ?></div>
     <div class="table-wrap">
         <table class="data-table">
             <thead>
@@ -652,7 +652,7 @@ require __DIR__ . '/includes/header.php';
                 <?php foreach ($payments as $p): ?>
                 <tr>
                     <td><?= escapeHtml($p['tailor_name'] ?? '-') ?></td>
-                    <td><strong>₦<?= number_format((float)$p['amount'], 0) ?></strong></td>
+                    <td><strong>₦<?= number_format((float)$p['amount'], 2) ?></strong></td>
                     <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($p['method'])) ?></span></td>
                     <td><?= escapeHtml($p['reference_code'] ?? '-') ?></td>
                     <td><?= escapeHtml($p['invoice_number'] ?? '-') ?></td>

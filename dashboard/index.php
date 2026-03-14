@@ -160,7 +160,7 @@ require __DIR__ . '/includes/header.php';
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         </div>
         <div class="analytics-content">
-            <span class="analytics-value">₦<?= number_format($revenueAll, 0) ?></span>
+            <span class="analytics-value">₦<?= number_format($revenueAll, 2) ?></span>
             <span class="analytics-label">Total revenue</span>
         </div>
     </div>
@@ -207,7 +207,7 @@ require __DIR__ . '/includes/header.php';
         <div class="stat-card">
             <div class="stat-icon stat-icon-revenue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
             <span class="stat-label">Revenue</span>
-            <span class="stat-value">₦<?= number_format($revenueTotal, 0) ?></span>
+            <span class="stat-value">₦<?= number_format($revenueTotal, 2) ?></span>
             <?php if ($prevSince && $revenuePrev > 0): ?>
             <span class="stat-delta <?= $growth($revenueTotal, $revenuePrev) >= 0 ? 'positive' : 'negative' ?>">
                 <?= $growth($revenueTotal, $revenuePrev) >= 0 ? '+' : '' ?><?= $growth($revenueTotal, $revenuePrev) ?>% vs prev
@@ -297,7 +297,7 @@ require __DIR__ . '/includes/header.php';
             <li>
                 <strong><?= escapeHtml($o['title'] ?? 'Order') ?></strong> — <?= escapeHtml($o['customer_name'] ?? '-') ?>
                 <span class="pill pill-success"><?= escapeHtml($o['status'] ?? 'pending') ?></span>
-                <?php if (!empty($o['amount_total'])): ?><span class="muted">₦<?= number_format((float)$o['amount_total'], 0) ?></span><?php endif; ?>
+                <?php if (!empty($o['amount_total'])): ?><span class="muted">₦<?= number_format((float)$o['amount_total'], 2) ?></span><?php endif; ?>
                 (due <?= $o['due_date'] ? date('M j, Y', strtotime($o['due_date'])) : '-' ?>)
             </li>
             <?php endforeach; ?>

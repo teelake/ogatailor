@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/utils/format_amount.dart';
+
 String _formatDate(String? iso) {
   if (iso == null || iso.isEmpty) return '—';
   final d = DateTime.tryParse(iso);
@@ -125,9 +127,9 @@ class InvoicePreviewWidget extends StatelessWidget {
                 return TableRow(
                   children: [
                     Padding(padding: const EdgeInsets.all(8), child: Text(desc, style: const TextStyle(fontSize: 10))),
-                    Padding(padding: const EdgeInsets.all(8), child: Text('$symbol${price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 10))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('$symbol${formatAmount(price)}', style: const TextStyle(fontSize: 10))),
                     Padding(padding: const EdgeInsets.all(8), child: Text(qty.toStringAsFixed(0), style: const TextStyle(fontSize: 10))),
-                    Padding(padding: const EdgeInsets.all(8), child: Text('$symbol${amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 10))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('$symbol${formatAmount(amount)}', style: const TextStyle(fontSize: 10))),
                   ],
                 );
               }),
@@ -136,7 +138,7 @@ class InvoicePreviewWidget extends StatelessWidget {
           const SizedBox(height: 16),
           Align(
             alignment: Alignment.centerRight,
-            child: Text('Total: $symbol${totalAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            child: Text('Total: $symbol${formatAmount(totalAmount)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           ),
         ],
       ),

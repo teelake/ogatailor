@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
+
+import '../../../core/utils/format_amount.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
@@ -165,9 +167,9 @@ Future<Uint8List> buildInvoicePdf(
                   return pw.TableRow(
                     children: [
                       pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(desc, style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('$symbol${price.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 10))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('$symbol${formatAmount(price)}', style: const pw.TextStyle(fontSize: 10))),
                       pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(qty.toStringAsFixed(0), style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('$symbol${amount.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 10))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('$symbol${formatAmount(amount)}', style: const pw.TextStyle(fontSize: 10))),
                     ],
                   );
                 }),
@@ -176,7 +178,7 @@ Future<Uint8List> buildInvoicePdf(
             pw.SizedBox(height: 16),
             pw.Align(
               alignment: pw.Alignment.centerRight,
-              child: pw.Text('Total: $symbol${totalAmount.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+              child: pw.Text('Total: $symbol${formatAmount(totalAmount)}', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
             ),
           ],
         );

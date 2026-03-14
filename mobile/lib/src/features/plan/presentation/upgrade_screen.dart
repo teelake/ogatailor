@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/utils/format_amount.dart';
 import '../application/plan_controller.dart';
 import '../data/plan_repository.dart';
 import '../domain/plan_tier.dart';
@@ -203,7 +204,7 @@ class _PlanCard extends StatelessWidget {
                 ),
                 if (!plan.isFree)
                   Text(
-                    '₦${plan.priceNgn.toStringAsFixed(0)}/mo',
+                    '₦${formatAmount(plan.priceNgn, decimalDigits: 0)}/mo',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
