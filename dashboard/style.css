@@ -282,6 +282,25 @@ body.login-page {
 
 .stat-card:hover { border-color: var(--border-strong); }
 
+.stats-grid-icons .stat-card { display: flex; flex-direction: column; position: relative; padding-left: 56px; }
+.stats-grid-icons .stat-icon {
+  position: absolute;
+  left: 20px;
+  top: 24px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stats-grid-icons .stat-icon svg { width: 20px; height: 20px; }
+.stat-icon-users { background: rgba(59, 130, 246, 0.15); color: var(--info); }
+.stat-icon-customers { background: rgba(16, 185, 129, 0.15); color: var(--accent); }
+.stat-icon-orders { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.stat-icon-invoices { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+.stat-icon-revenue { background: rgba(16, 185, 129, 0.15); color: var(--accent); }
+
 .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 700; }
 .stat-delta { font-size: 12px; font-weight: 600; display: block; margin-top: 6px; }

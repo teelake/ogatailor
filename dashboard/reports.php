@@ -6,8 +6,11 @@ require_once __DIR__ . '/config.php';
 requireAdmin();
 
 $view = $_GET['view'] ?? 'overview';
-$validViews = ['overview', 'tailors', 'customers', 'orders'];
+$validViews = ['overview', 'tailors', 'customers', 'orders', 'payments', 'subscriptions'];
 $view = in_array($view, $validViews, true) ? $view : 'overview';
+
+$methodFilter = $_GET['method'] ?? 'all';
+$methodFilter = in_array($methodFilter, ['all', 'cash', 'transfer', 'pos', 'card', 'other'], true) ? $methodFilter : 'all';
 
 $period = $_GET['period'] ?? '30';
 $period = in_array($period, ['7', '30', '90', 'all'], true) ? $period : '30';
@@ -27,7 +30,7 @@ $offset = ($page - 1) * $perPage;
 
 $export = isset($_GET['export']) && $_GET['export'] === 'csv';
 
-$baseParams = ['view' => $view, 'period' => $period, 'plan' => $planFilter, 'q' => $search];
+$baseParams = ['view' => $view, 'period' => $period, 'plan' => $planFilter, 'q' => $search, 'method' => $methodFilter];
 if ($tailorId) $baseParams['tailor_id'] = $tailorId;
 if ($customerId) $baseParams['customer_id'] = $customerId;
 
@@ -177,6 +180,8 @@ $totalRows = match ($view) {
     'tailors' => $tailorsTotal,
     'customers' => $customersTotal,
     'orders' => $ordersTotal,
+    'payments' => $paymentsTotal,
+    'subscriptions' => $subscriptionsTotal,
     default => 0,
 };
 $totalPages = $totalRows > 0 ? (int)ceil($totalRows / $perPage) : 1;
@@ -211,6 +216,8 @@ require __DIR__ . '/includes/header.php';
                     <option value="tailors" <?= $view === 'tailors' ? 'selected' : '' ?>>Tailors</option>
                     <option value="customers" <?= $view === 'customers' ? 'selected' : '' ?>>Customers</option>
                     <option value="orders" <?= $view === 'orders' ? 'selected' : '' ?>>Orders</option>
+                    <option value="payments" <?= $view === 'payments' ? 'selected' : '' ?>>Payments</option>
+                    <option value="subscriptions" <?= $view === 'subscriptions' ? 'selected' : '' ?>>Subscriptions</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -231,7 +238,7 @@ require __DIR__ . '/includes/header.php';
                     <option value="pro" <?= $planFilter === 'pro' ? 'selected' : '' ?>>Pro</option>
                 </select>
             </div>
-            <?php if (in_array($view, ['customers', 'orders'])): ?>
+            <?php if (in_array($view, ['customers', 'orders', 'payments'])): ?>
             <div class="filter-group">
                 <label>Tailor</label>
                 <select name="tailor_id" onchange="this.form.submit()" class="form-control">
@@ -242,11 +249,24 @@ require __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <?php endif; ?>
+            <?php if ($view === 'payments'): ?>
+            <div class="filter-group">
+                <label>Method</label>
+                <select name="method" onchange="this.form.submit()" class="form-control">
+                    <option value="all" <?= $methodFilter === 'all' ? 'selected' : '' ?>>All methods</option>
+                    <option value="cash" <?= $methodFilter === 'cash' ? 'selected' : '' ?>>Cash</option>
+                    <option value="transfer" <?= $methodFilter === 'transfer' ? 'selected' : '' ?>>Transfer</option>
+                    <option value="pos" <?= $methodFilter === 'pos' ? 'selected' : '' ?>>POS</option>
+                    <option value="card" <?= $methodFilter === 'card' ? 'selected' : '' ?>>Card</option>
+                    <option value="other" <?= $methodFilter === 'other' ? 'selected' : '' ?>>Other</option>
+                </select>
+            </div>
+            <?php endif; ?>
             <div class="filter-group filter-search">
                 <label>Search</label>
                 <input type="text" name="q" class="form-control" value="<?= escapeHtml($search) ?>" placeholder="Search...">
             </div>
-            <?php if (in_array($view, ['tailors', 'customers', 'orders'])): ?>
+            <?php if (in_array($view, ['tailors', 'customers', 'orders', 'payments', 'subscriptions'])): ?>
             <div class="filter-group">
                 <label>Per page</label>
                 <select name="per" onchange="this.form.submit()" class="form-control">
@@ -457,6 +477,79 @@ require __DIR__ . '/includes/header.php';
     </div>
     <?php if (empty($orders)): ?>
     <p class="muted" style="padding: 24px;">No orders match the filters.</p>
+    <?php else: ?>
+    <?php require __DIR__ . '/includes/pagination.php'; ?>
+    <?php endif; ?>
+</div>
+
+<?php elseif ($view === 'payments'): ?>
+<div class="card">
+    <div class="card-title">Payments (<?= number_format($paymentsTotal) ?>) — Total: ₦<?= number_format($paymentsSum, 0) ?></div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Tailor</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                    <th>Reference</th>
+                    <th>Invoice</th>
+                    <th>Paid at</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($payments as $p): ?>
+                <tr>
+                    <td><?= escapeHtml($p['tailor_name'] ?? '-') ?></td>
+                    <td><strong>₦<?= number_format((float)$p['amount'], 0) ?></strong></td>
+                    <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($p['method'])) ?></span></td>
+                    <td><?= escapeHtml($p['reference_code'] ?? '-') ?></td>
+                    <td><?= escapeHtml($p['invoice_number'] ?? '-') ?></td>
+                    <td><?= date('M j, Y H:i', strtotime($p['paid_at'])) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php if (empty($payments)): ?>
+    <p class="muted" style="padding: 24px;">No payments match the filters.</p>
+    <?php else: ?>
+    <?php require __DIR__ . '/includes/pagination.php'; ?>
+    <?php endif; ?>
+</div>
+
+<?php elseif ($view === 'subscriptions'): ?>
+<div class="card">
+    <div class="card-title">Subscriptions — Tailors by plan (<?= number_format($subscriptionsTotal) ?>)</div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Tailor</th>
+                    <th>Plan</th>
+                    <th>Expires</th>
+                    <th>Customers</th>
+                    <th>Joined</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($subscriptions as $s): ?>
+                <tr>
+                    <td>
+                        <strong><?= escapeHtml($s['full_name']) ?></strong>
+                        <?php if (!empty($s['email'])): ?><br><span class="muted" style="font-size:12px;"><?= escapeHtml($s['email']) ?></span><?php endif; ?>
+                    </td>
+                    <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($s['plan_code'])) ?></span></td>
+                    <td><?= $s['plan_expires_at'] ? date('M j, Y', strtotime($s['plan_expires_at'])) : '<span class="muted">—</span>' ?></td>
+                    <td><?= (int)$s['cust_count'] ?></td>
+                    <td><?= date('M j, Y', strtotime($s['created_at'])) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php if (empty($subscriptions)): ?>
+    <p class="muted" style="padding: 24px;">No subscriptions match the filters.</p>
     <?php else: ?>
     <?php require __DIR__ . '/includes/pagination.php'; ?>
     <?php endif; ?>
