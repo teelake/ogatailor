@@ -170,6 +170,7 @@ function planSettingDefaults(string $planCode): array
             'can_export' => 1,
             'can_multi_device' => 0,
             'can_advanced_reminders' => 1,
+            'invoices_per_month' => 100,
         ];
     }
     if ($plan === 'pro') {
@@ -180,6 +181,7 @@ function planSettingDefaults(string $planCode): array
             'can_export' => 1,
             'can_multi_device' => 1,
             'can_advanced_reminders' => 1,
+            'invoices_per_month' => 500,
         ];
     }
 
@@ -190,6 +192,7 @@ function planSettingDefaults(string $planCode): array
         'can_export' => 0,
         'can_multi_device' => 0,
         'can_advanced_reminders' => 0,
+        'invoices_per_month' => 25,
     ];
 }
 
@@ -200,7 +203,7 @@ function planSettings(\PDO $pdo, string $planCode): array
         $normalized = 'starter';
     }
     $stmt = $pdo->prepare(
-        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders
+        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, invoices_per_month
          FROM plan_settings
          WHERE plan_code = :plan_code
          LIMIT 1'
@@ -217,6 +220,7 @@ function planSettings(\PDO $pdo, string $planCode): array
         'can_export' => (int)$row['can_export'],
         'can_multi_device' => (int)$row['can_multi_device'],
         'can_advanced_reminders' => (int)$row['can_advanced_reminders'],
+        'invoices_per_month' => isset($row['invoices_per_month']) && $row['invoices_per_month'] !== null ? (int)$row['invoices_per_month'] : null,
     ];
 }
 
@@ -875,11 +879,24 @@ if ($method === 'GET' && routeMatches($path, '/api/plan/summary')) {
     $customerCount = (int)$countStmt->fetchColumn();
     $settings = planSettings($pdo, (string)($user['plan_code'] ?? 'starter'));
 
+    $invoiceLimit = $settings['invoices_per_month'] ?? null;
+    $invoiceCount = 0;
+    if ($invoiceLimit !== null) {
+        $monthStart = date('Y-m-01 00:00:00');
+        $invStmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM invoices WHERE owner_user_id = :owner_user_id AND created_at >= :month_start'
+        );
+        $invStmt->execute([':owner_user_id' => $ownerId, ':month_start' => $monthStart]);
+        $invoiceCount = (int)$invStmt->fetchColumn();
+    }
+
     Response::json([
         'plan_code' => $user['plan_code'],
         'plan_expires_at' => $user['plan_expires_at'],
         'customer_count' => $customerCount,
         'customer_limit' => $settings['customer_limit'],
+        'invoices_used_this_month' => $invoiceCount,
+        'invoices_per_month' => $invoiceLimit,
         'features' => [
             'can_sync' => ((int)$settings['can_sync']) === 1,
             'can_export' => ((int)$settings['can_export']) === 1,
@@ -1783,6 +1800,24 @@ if ($method === 'POST' && routeMatches($path, '/api/invoices/generate')) {
         return;
     }
 
+    $planCode = (string)($authUser['plan_code'] ?? 'starter');
+    $settings = planSettings($pdo, $planCode);
+    $invoiceLimit = $settings['invoices_per_month'] ?? null;
+    if ($invoiceLimit !== null) {
+        $monthStart = date('Y-m-01 00:00:00');
+        $countStmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM invoices WHERE owner_user_id = :owner_user_id AND created_at >= :month_start'
+        );
+        $countStmt->execute([':owner_user_id' => $ownerId, ':month_start' => $monthStart]);
+        $invoiceCount = (int)$countStmt->fetchColumn();
+        if ($invoiceCount >= $invoiceLimit) {
+            Response::json([
+                'error' => 'Invoice limit reached (' . $invoiceLimit . '/month). Upgrade to Growth or Pro for more.',
+            ], 403);
+            return;
+        }
+    }
+
     $seqStmt = $pdo->prepare(
         'SELECT COALESCE(MAX(CAST(invoice_number AS UNSIGNED)), 0) + 1 AS next_num
          FROM invoices
@@ -2093,7 +2128,7 @@ if ($method === 'GET' && routeMatches($path, '/api/admin/dashboard')) {
 
 if ($method === 'GET' && routeMatches($path, '/api/admin/plans')) {
     $stmt = $pdo->query(
-        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, updated_at
+        'SELECT plan_code, customer_limit, invoices_per_month, can_sync, can_export, can_multi_device, can_advanced_reminders, updated_at
          FROM plan_settings
          ORDER BY FIELD(plan_code, \'starter\', \'growth\', \'pro\')'
     );
@@ -2122,6 +2157,16 @@ if ($method === 'PATCH' && routeMatches($path, '/api/admin/plans')) {
         $params[':customer_limit'] = $limit === null ? null : (int)$limit;
     }
 
+    if (array_key_exists('invoices_per_month', $data)) {
+        $invLimit = $data['invoices_per_month'];
+        if ($invLimit !== null && (!is_numeric($invLimit) || (int)$invLimit < 1 || (int)$invLimit > 10000)) {
+            Response::json(['error' => 'invoices_per_month must be null or an integer between 1 and 10000'], 422);
+            return;
+        }
+        $fields[] = 'invoices_per_month = :invoices_per_month';
+        $params[':invoices_per_month'] = $invLimit === null ? null : (int)$invLimit;
+    }
+
     $boolFields = ['can_sync', 'can_export', 'can_multi_device', 'can_advanced_reminders'];
     foreach ($boolFields as $name) {
         if (array_key_exists($name, $data)) {
@@ -2145,7 +2190,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/admin/plans')) {
     $stmt->execute($params);
 
     $read = $pdo->prepare(
-        'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders, updated_at
+        'SELECT plan_code, customer_limit, invoices_per_month, can_sync, can_export, can_multi_device, can_advanced_reminders, updated_at
          FROM plan_settings
          WHERE plan_code = :plan_code
          LIMIT 1'

@@ -35,17 +35,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (in_array($planCode, ['starter', 'growth', 'pro'], true)) {
             $limit = trim((string)($_POST['customer_limit'] ?? ''));
             $customerLimit = $limit === '' ? null : (int)$limit;
+            $invoiceLimit = trim((string)($_POST['invoices_per_month'] ?? ''));
+            $invoicesPerMonth = $invoiceLimit === '' ? null : (int)$invoiceLimit;
             $canSync = isset($_POST['can_sync']);
             $canExport = isset($_POST['can_export']);
             $canMultiDevice = isset($_POST['can_multi_device']);
             $canAdvancedReminders = isset($_POST['can_advanced_reminders']);
 
             $pdo->prepare(
-                'UPDATE plan_settings SET customer_limit = :limit, can_sync = :sync, can_export = :export,
-                 can_multi_device = :multi, can_advanced_reminders = :reminders, updated_at = NOW()
+                'UPDATE plan_settings SET customer_limit = :limit, invoices_per_month = :invoices,
+                 can_sync = :sync, can_export = :export, can_multi_device = :multi,
+                 can_advanced_reminders = :reminders, updated_at = NOW()
                  WHERE plan_code = :code'
             )->execute([
                 ':limit' => $customerLimit,
+                ':invoices' => $invoicesPerMonth,
                 ':sync' => $canSync ? 1 : 0,
                 ':export' => $canExport ? 1 : 0,
                 ':multi' => $canMultiDevice ? 1 : 0,
@@ -138,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $plans = $pdo->query(
-    'SELECT plan_code, customer_limit, can_sync, can_export, can_multi_device, can_advanced_reminders
+    'SELECT plan_code, customer_limit, invoices_per_month, can_sync, can_export, can_multi_device, can_advanced_reminders
      FROM plan_settings ORDER BY FIELD(plan_code, \'starter\', \'growth\', \'pro\')'
 )->fetchAll();
 $watermarkPlans = array_filter(explode(',', $getSetting('watermark_plans') ?? ''));
@@ -179,6 +183,12 @@ require __DIR__ . '/includes/header.php';
                 <label>Customer limit</label>
                 <input type="number" name="customer_limit" class="form-control" min="1" placeholder="Unlimited"
                     value="<?= $plan['customer_limit'] !== null ? (int)$plan['customer_limit'] : '' ?>">
+            </div>
+            <div class="form-group">
+                <label>Invoices per month</label>
+                <input type="number" name="invoices_per_month" class="form-control" min="1" placeholder="Unlimited"
+                    value="<?= isset($plan['invoices_per_month']) && $plan['invoices_per_month'] !== null ? (int)$plan['invoices_per_month'] : '' ?>">
+                <span class="muted" style="font-size: 12px;">Soft limit. Leave blank for unlimited.</span>
             </div>
             <div class="form-check">
                 <input type="checkbox" name="can_sync" id="sync_<?= $plan['plan_code'] ?>" <?= (int)$plan['can_sync'] ? 'checked' : '' ?>>

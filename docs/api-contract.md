@@ -167,6 +167,7 @@ Base URL: `https://your-domain.com/api`
   - body: `order_id` (required)
   - requires business profile (invoice setup) completed
   - returns 200 if invoice already exists for order
+  - returns 403 if plan invoice limit reached (e.g. `error`: "Invoice limit reached (25/month). Upgrade to Growth or Pro for more.")
 - `GET /api/invoices/by-order?order_id={uuid}` (protected)
   - returns full invoice data for PDF/image generation
 
@@ -180,7 +181,8 @@ Base URL: `https://your-domain.com/api`
 
 ## Plan Summary
 
-- `GET /api/plan/summary`
+- `GET /api/plan/summary` (protected)
+  - returns: `plan_code`, `plan_expires_at`, `customer_count`, `customer_limit`, `invoices_used_this_month`, `invoices_per_month`, `features` (can_sync, can_export, etc.)
 
 ## Diagnostics and Export
 
@@ -199,6 +201,7 @@ Base URL: `https://your-domain.com/api`
   - body:
     - `plan_code` (`starter|growth|pro`, required)
     - `customer_limit` (int or null)
+    - `invoices_per_month` (int or null) – soft limit per month; null = unlimited
     - `can_sync` (bool)
     - `can_export` (bool)
     - `can_multi_device` (bool)

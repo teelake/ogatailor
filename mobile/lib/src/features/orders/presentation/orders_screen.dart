@@ -20,6 +20,7 @@ import '../../invoice/data/invoice_repository.dart';
 import '../../invoice/presentation/invoice_pdf_builder.dart';
 import '../../invoice/presentation/invoice_preview_widget.dart';
 import '../../invoice/presentation/invoice_setup_screen.dart';
+import '../../plan/application/plan_controller.dart';
 import '../application/orders_controller.dart';
 import '../data/orders_repository.dart';
 import '../domain/order_entry.dart';
@@ -839,6 +840,7 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(authControllerProvider).valueOrNull;
+    final planSummary = ref.watch(planSummaryProvider).valueOrNull;
     final statuses = const ['pending', 'in_progress', 'ready', 'delivered', 'cancelled'];
 
     return Scaffold(
@@ -974,9 +976,44 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
               icon: const Icon(Icons.edit_calendar_rounded),
               label: const Text('Edit Due Date'),
             ),
+            if (planSummary?.hasInvoiceLimit == true) ...[
+              const SizedBox(height: 12),
+              Card(
+                color: planSummary!.isAtInvoiceLimit
+                    ? Theme.of(context).colorScheme.errorContainer.withOpacity(0.3)
+                    : planSummary.isNearInvoiceLimit
+                        ? Theme.of(context).colorScheme.tertiaryContainer.withOpacity(0.5)
+                        : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        planSummary.isAtInvoiceLimit ? Icons.info_outline_rounded : Icons.receipt_rounded,
+                        size: 20,
+                        color: planSummary.isAtInvoiceLimit
+                            ? Theme.of(context).colorScheme.error
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          planSummary.isAtInvoiceLimit
+                              ? 'Invoice limit reached (${planSummary.invoicesPerMonth}/month). Upgrade for more.'
+                              : 'Invoices this month: ${planSummary.invoicesUsedThisMonth} / ${planSummary.invoicesPerMonth}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             OutlinedButton.icon(
-              onPressed: session == null ? null : () => _showInvoiceFlow(context),
+              onPressed: session == null || (planSummary?.isAtInvoiceLimit ?? false)
+                  ? null
+                  : () => _showInvoiceFlow(context),
               icon: const Icon(Icons.receipt_long_rounded),
               label: const Text('Generate Invoice'),
             ),
@@ -990,6 +1027,7 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
     final repo = ref.read(invoiceRepositoryProvider);
     try {
       await repo.generateFromOrder(widget.order.id);
+      ref.invalidate(planSummaryProvider);
     } catch (e) {
       final err = userFriendlyError(e, fallback: 'Could not generate invoice.');
       if (err.contains('Complete invoice setup') && context.mounted) {

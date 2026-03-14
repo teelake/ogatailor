@@ -16,6 +16,8 @@ class PlanRepository {
       planCode: (data['plan_code'] ?? 'starter') as String,
       customerCount: (data['customer_count'] ?? 0) as int,
       customerLimit: data['customer_limit'] as int?,
+      invoicesUsedThisMonth: (data['invoices_used_this_month'] ?? 0) as int,
+      invoicesPerMonth: data['invoices_per_month'] as int?,
     );
   }
 }

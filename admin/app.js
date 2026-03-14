@@ -201,6 +201,11 @@ function renderPlans(rows) {
           <input data-field="customer_limit" type="number" min="1" placeholder="Unlimited (blank)"
             value="${row.customer_limit == null ? '' : Number(row.customer_limit)}" />
         </label>
+        <label>
+          Invoices per month
+          <input data-field="invoices_per_month" type="number" min="1" placeholder="Unlimited (blank)"
+            value="${row.invoices_per_month == null ? '' : Number(row.invoices_per_month)}" />
+        </label>
         ${check('Cloud sync', 'can_sync', row.can_sync)}
         ${check('Export', 'can_export', row.can_export)}
         ${check('Multi-device', 'can_multi_device', row.can_multi_device)}
@@ -215,9 +220,11 @@ function renderPlans(rows) {
       const planCode = btn.getAttribute('data-save');
       const card = btn.closest('.plan-card');
       const limitInput = card.querySelector('input[data-field="customer_limit"]');
+      const invoicesInput = card.querySelector('input[data-field="invoices_per_month"]');
       const payload = {
         plan_code: planCode,
         customer_limit: limitInput.value.trim() === '' ? null : Number(limitInput.value),
+        invoices_per_month: invoicesInput?.value?.trim() === '' ? null : Number(invoicesInput?.value || 0),
       };
       ['can_sync', 'can_export', 'can_multi_device', 'can_advanced_reminders'].forEach((name) => {
         const el = card.querySelector(`input[data-field="${name}"]`);
