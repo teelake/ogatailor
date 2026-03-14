@@ -27,5 +27,8 @@ DirectoryIndex index.php
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
 
+    # API routes -> index.php (backend)
+    RewriteRule ^api/ index.php [QSA,L]
+
     RewriteRule ^ index.php [QSA,L]
 </IfModule>

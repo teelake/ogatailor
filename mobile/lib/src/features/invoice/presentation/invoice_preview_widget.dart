@@ -45,8 +45,12 @@ class InvoicePreviewWidget extends StatelessWidget {
     final totalAmount = (invoice['total_amount'] ?? 0) as num;
     final items = (invoice['items'] as List<dynamic>?) ?? [];
     final logoBase64 = (invoice['logo_data'] as String?)?.trim();
+    final watermark = invoice['watermark'] as Map<String, dynamic>?;
+    final wmWebsiteUrl = watermark != null
+        ? (watermark['website_url'] ?? 'https://ogatailor.app').toString().replaceFirst(RegExp(r'^https?://'), '')
+        : null;
 
-    return Container(
+    final content = Container(
       width: width,
       padding: const EdgeInsets.all(24),
       color: Colors.white,
@@ -134,5 +138,28 @@ class InvoicePreviewWidget extends StatelessWidget {
         ],
       ),
     );
+
+    if (wmWebsiteUrl != null && wmWebsiteUrl.isNotEmpty) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          content,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Transform.rotate(
+                  angle: -0.5,
+                  child: Opacity(
+                    opacity: 0.15,
+                    child: Text(wmWebsiteUrl, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return content;
   }
 }

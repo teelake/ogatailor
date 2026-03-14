@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -20,7 +21,10 @@ String _currencySymbol(String currency) {
   };
 }
 
-Future<Uint8List> buildInvoicePdf(Map<String, dynamic> invoice) async {
+Future<Uint8List> buildInvoicePdf(
+  Map<String, dynamic> invoice, {
+  Dio? dio,
+}) async {
   final pdf = pw.Document();
   final businessName = (invoice['business_name'] ?? '').toString();
   final businessPhone = (invoice['business_phone'] ?? '').toString();
@@ -44,12 +48,58 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> invoice) async {
     } catch (_) {}
   }
 
+  final watermark = invoice['watermark'] as Map<String, dynamic>?;
+  pw.Widget? watermarkOverlay;
+  if (watermark != null) {
+    final wmType = (watermark['type'] ?? 'both').toString();
+    final wmLogoUrl = (watermark['logo_url'] as String?)?.trim();
+    final wmWebsiteUrl = (watermark['website_url'] ?? 'https://ogatailor.app').toString();
+    pw.ImageProvider? wmLogoImage;
+    if ((wmType == 'logo' || wmType == 'both') && wmLogoUrl != null && wmLogoUrl.isNotEmpty) {
+      if (wmLogoUrl.startsWith('data:image/')) {
+        try {
+          final base64 = wmLogoUrl.contains(',') ? wmLogoUrl.split(',').last : wmLogoUrl;
+          final bytes = base64Decode(base64.replaceAll(RegExp(r'\s'), ''));
+          wmLogoImage = pw.MemoryImage(bytes);
+        } catch (_) {}
+      } else if (dio != null && (wmLogoUrl.startsWith('http://') || wmLogoUrl.startsWith('https://'))) {
+        try {
+          final res = await dio.get<List<int>>(wmLogoUrl, options: Options(responseType: ResponseType.bytes));
+          if (res.data != null && res.data!.isNotEmpty) {
+            wmLogoImage = pw.MemoryImage(Uint8List.fromList(res.data!));
+          }
+        } catch (_) {}
+      }
+    }
+    watermarkOverlay = pw.Transform.rotate(
+      angle: -0.5,
+      child: pw.Opacity(
+        opacity: 0.15,
+        child: pw.Center(
+          child: pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              if (wmLogoImage != null)
+                pw.Container(
+                  width: 80,
+                  height: 80,
+                  child: pw.Image(wmLogoImage, fit: pw.BoxFit.contain),
+                ),
+              if ((wmType == 'url' || wmType == 'both') && wmWebsiteUrl.isNotEmpty)
+                pw.Text(wmWebsiteUrl.replaceFirst(RegExp(r'^https?://'), ''), style: const pw.TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   pdf.addPage(
     pw.Page(
       pageFormat: PdfPageFormat.a4,
       margin: const pw.EdgeInsets.all(32),
       build: (pw.Context context) {
-        return pw.Column(
+        final content = pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Row(
@@ -129,6 +179,15 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> invoice) async {
             ),
           ],
         );
+        if (watermarkOverlay != null) {
+          return pw.Stack(
+            children: [
+              content,
+              pw.Positioned.fill(child: watermarkOverlay!),
+            ],
+          );
+        }
+        return content;
       },
     ),
   );

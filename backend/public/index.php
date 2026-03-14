@@ -35,6 +35,11 @@ if ($path !== '/' && str_starts_with($path, '/oga-tailor/')) {
     $path = substr($path, strlen('/oga-tailor'));
     $path = $path === '' ? '/' : $path;
 }
+if ($path !== '/' && str_starts_with($path, '/oga-tailor')) {
+    $path = substr($path, strlen('/oga-tailor'));
+    $path = ($path === '' || $path === '/') ? '/' : $path;
+}
+$path = ($path !== '' && $path[0] !== '/') ? '/' . $path : $path;
 
 if ($method === 'OPTIONS') {
     http_response_code(204);
@@ -401,15 +406,37 @@ if ($method === 'GET' && routeMatches($path, '/api/reminders/send-digests')) {
 if ($method === 'GET' && routeMatches($path, '/api/config')) {
     $stmt = $pdo->query(
         "SELECT setting_key, setting_value FROM platform_settings
-         WHERE setting_key IN ('platform_url', 'platform_logo_url')"
+         WHERE setting_key IN (
+           'platform_url', 'platform_logo_url', 'platform_support_email', 'platform_support_phone',
+           'invoice_default_currency', 'invoice_default_vat_rate', 'invoice_default_payment_terms',
+           'logo_max_size_kb', 'logo_min_dimension', 'logo_max_dimension'
+         )"
     );
     $settings = [];
     while ($row = $stmt->fetch()) {
         $settings[$row['setting_key']] = $row['setting_value'] ?? '';
     }
+    $logoMaxKb = (int)($settings['logo_max_size_kb'] ?? 500);
+    $logoMinDim = (int)($settings['logo_min_dimension'] ?? 64);
+    $logoMaxDim = (int)($settings['logo_max_dimension'] ?? 512);
+    $logoUrl = trim($settings['platform_logo_url'] ?? '');
+    $supportEmail = trim($settings['platform_support_email'] ?? '');
+    $supportPhone = trim($settings['platform_support_phone'] ?? '');
     Response::json([
         'platform_url' => $settings['platform_url'] ?? 'https://ogatailor.app',
-        'platform_logo_url' => $settings['platform_logo_url'] ?? null,
+        'platform_logo_url' => $logoUrl !== '' ? $logoUrl : null,
+        'support_email' => $supportEmail !== '' ? $supportEmail : null,
+        'support_phone' => $supportPhone !== '' ? $supportPhone : null,
+        'invoice_defaults' => [
+            'currency' => $settings['invoice_default_currency'] ?? 'NGN',
+            'vat_rate' => (float)($settings['invoice_default_vat_rate'] ?? 7.5),
+            'payment_terms' => trim($settings['invoice_default_payment_terms'] ?? 'Payment due within 7 days'),
+        ],
+        'logo_constraints' => [
+            'max_size_kb' => $logoMaxKb,
+            'min_dimension' => $logoMinDim,
+            'max_dimension' => $logoMaxDim,
+        ],
     ]);
     return;
 }
@@ -492,20 +519,24 @@ function validateCacNumber(string $cac): bool
 }
 
 /**
- * Validate logo: base64 PNG/JPEG/WEBP, max 500KB decoded, dimensions 64-512px.
+ * Validate logo: base64 PNG/JPEG/WEBP. Uses platform_settings for constraints if provided.
  * Returns [valid: bool, error: ?string].
+ * @param array{max_size_kb?: int, min_dimension?: int, max_dimension?: int}|null $constraints
  */
-function validateLogo(?string $base64): array
+function validateLogo(?string $base64, ?array $constraints = null): array
 {
     if ($base64 === null || trim($base64) === '') {
         return [true, null];
     }
+    $maxKb = $constraints['max_size_kb'] ?? 500;
+    $minDim = $constraints['min_dimension'] ?? 64;
+    $maxDim = $constraints['max_dimension'] ?? 512;
     $raw = base64_decode(str_replace([' ', "\r", "\n"], '', $base64), true);
     if ($raw === false || strlen($raw) === 0) {
         return [false, 'Logo must be valid base64'];
     }
-    if (strlen($raw) > 512 * 1024) {
-        return [false, 'Logo must be under 500KB'];
+    if (strlen($raw) > $maxKb * 1024) {
+        return [false, "Logo must be under {$maxKb}KB"];
     }
     $finfo = new \finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->buffer($raw);
@@ -520,8 +551,8 @@ function validateLogo(?string $base64): array
     $w = imagesx($img);
     $h = imagesy($img);
     imagedestroy($img);
-    if ($w < 64 || $h < 64 || $w > 512 || $h > 512) {
-        return [false, 'Logo must be between 64x64 and 512x512 pixels'];
+    if ($w < $minDim || $h < $minDim || $w > $maxDim || $h > $maxDim) {
+        return [false, "Logo must be between {$minDim}x{$minDim} and {$maxDim}x{$maxDim} pixels"];
     }
     return [true, null];
 }
@@ -1641,7 +1672,20 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
         }
         $updateLogo = true;
         if ($logoData !== null) {
-            [$logoValid, $logoError] = validateLogo($logoData);
+            $lcStmt = $pdo->query(
+                "SELECT setting_key, setting_value FROM platform_settings
+                 WHERE setting_key IN ('logo_max_size_kb', 'logo_min_dimension', 'logo_max_dimension')"
+            );
+            $lc = [];
+            while ($row = $lcStmt->fetch()) {
+                $lc[$row['setting_key']] = $row['setting_value'];
+            }
+            $logoConstraints = [
+                'max_size_kb' => (int)($lc['logo_max_size_kb'] ?? 500),
+                'min_dimension' => (int)($lc['logo_min_dimension'] ?? 64),
+                'max_dimension' => (int)($lc['logo_max_dimension'] ?? 512),
+            ];
+            [$logoValid, $logoError] = validateLogo($logoData, $logoConstraints);
             if (!$logoValid) {
                 Response::json(['error' => $logoError], 422);
                 return;
@@ -1920,6 +1964,24 @@ if ($method === 'GET' && routeMatches($path, '/api/invoices/by-order')) {
     );
     $itemsStmt->execute([':invoice_id' => $invoice['id']]);
     $invoice['items'] = $itemsStmt->fetchAll();
+
+    $planCode = (string)($authUser['plan_code'] ?? 'starter');
+    $wmStmt = $pdo->query(
+        "SELECT setting_key, setting_value FROM platform_settings
+         WHERE setting_key IN ('watermark_type', 'watermark_logo_url', 'watermark_website_url', 'watermark_plans')"
+    );
+    $wmSettings = [];
+    while ($row = $wmStmt->fetch()) {
+        $wmSettings[$row['setting_key']] = $row['setting_value'] ?? '';
+    }
+    $watermarkPlans = array_filter(explode(',', $wmSettings['watermark_plans'] ?? ''));
+    if (in_array($planCode, $watermarkPlans, true)) {
+        $invoice['watermark'] = [
+            'type' => $wmSettings['watermark_type'] ?? 'both',
+            'logo_url' => trim($wmSettings['watermark_logo_url'] ?? '') ?: null,
+            'website_url' => trim($wmSettings['watermark_website_url'] ?? 'https://ogatailor.app') ?: 'https://ogatailor.app',
+        ];
+    }
 
     Response::json(['data' => $invoice]);
     return;

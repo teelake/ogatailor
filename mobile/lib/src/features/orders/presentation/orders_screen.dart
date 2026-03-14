@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +17,7 @@ import '../../../core/widgets/empty_state.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../customers/application/customers_controller.dart';
 import '../../customers/domain/customer.dart';
+import '../../../core/network/api_client.dart';
 import '../../invoice/data/invoice_repository.dart';
 import '../../invoice/presentation/invoice_pdf_builder.dart';
 import '../../invoice/presentation/invoice_preview_widget.dart';
@@ -1064,15 +1066,16 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
     if (!context.mounted) return;
     await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => _InvoiceShareSheet(invoice: invoice),
+      builder: (ctx) => _InvoiceShareSheet(invoice: invoice, dio: ref.read(dioProvider)),
     );
   }
 }
 
 class _InvoiceShareSheet extends StatefulWidget {
-  const _InvoiceShareSheet({required this.invoice});
+  const _InvoiceShareSheet({required this.invoice, required this.dio});
 
   final Map<String, dynamic> invoice;
+  final Dio dio;
 
   @override
   State<_InvoiceShareSheet> createState() => _InvoiceShareSheetState();
@@ -1127,7 +1130,7 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
 
   Future<void> _sharePdf(BuildContext context) async {
     try {
-      final bytes = await buildInvoicePdf(invoice);
+      final bytes = await buildInvoicePdf(invoice, dio: widget.dio);
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/invoice_${invoice['invoice_number'] ?? 'inv'}.pdf');
       await file.writeAsBytes(bytes);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../auth/application/auth_controller.dart';
 import '../../auth/presentation/auth_sheet.dart';
@@ -7,6 +8,7 @@ import '../../auth/presentation/change_password_screen.dart';
 import '../../auth/presentation/edit_profile_screen.dart';
 import '../../invoice/presentation/invoice_setup_screen.dart';
 import '../../orders/application/orders_controller.dart';
+import '../../config/application/config_controller.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/presentation/upgrade_screen.dart';
 import '../../reports/presentation/export_reports_screen.dart';
@@ -114,6 +116,12 @@ class SettingsScreen extends ConsumerWidget {
             ],
           ),
           _SettingsSection(
+            title: 'Help',
+            children: [
+              _HelpSupportTile(),
+            ],
+          ),
+          _SettingsSection(
             title: 'Session',
             children: [
               _SettingsTile(
@@ -207,6 +215,64 @@ class _SettingsTile extends StatelessWidget {
         trailing: trailing ?? const Icon(Icons.chevron_right_rounded, size: 20),
         onTap: onTap,
       ),
+    );
+  }
+}
+
+class _HelpSupportTile extends ConsumerWidget {
+  const _HelpSupportTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final configAsync = ref.watch(appConfigProvider);
+
+    return configAsync.when(
+      data: (config) {
+        if (config == null) return const SizedBox.shrink();
+        final hasSupport = (config.supportEmail?.isNotEmpty ?? false) ||
+            (config.supportPhone?.isNotEmpty ?? false);
+        final hasWebsite = config.platformUrl.isNotEmpty &&
+            (config.platformUrl.startsWith('http://') || config.platformUrl.startsWith('https://'));
+
+        if (!hasSupport && !hasWebsite) return const SizedBox.shrink();
+
+        return Card(
+          margin: _kSettingsCardMargin,
+          child: Column(
+            children: [
+              if (config.supportEmail != null && config.supportEmail!.isNotEmpty)
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: const Icon(Icons.email_rounded, color: AppColors.primary),
+                  title: const Text('Email support'),
+                  subtitle: Text(config.supportEmail!),
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => launchUrl(Uri.parse('mailto:${config.supportEmail}')),
+                ),
+              if (config.supportPhone != null && config.supportPhone!.isNotEmpty)
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: const Icon(Icons.phone_rounded, color: AppColors.primary),
+                  title: const Text('Call support'),
+                  subtitle: Text(config.supportPhone!),
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => launchUrl(Uri.parse('tel:${config.supportPhone}')),
+                ),
+              if (hasWebsite)
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: const Icon(Icons.language_rounded, color: AppColors.primary),
+                  title: const Text('Visit website'),
+                  subtitle: Text(config.platformUrl.replaceFirst(RegExp(r'^https?://'), '')),
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => launchUrl(Uri.parse(config.platformUrl)),
+                ),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/utils/error_message.dart';
+import '../../config/application/config_controller.dart';
+import '../../config/data/config_repository.dart';
 import '../data/invoice_repository.dart';
 import '../domain/logo_validator.dart';
 
@@ -56,6 +58,10 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
   }
 
   Future<void> _loadProfile() async {
+    AppConfig? config;
+    try {
+      config = await ref.read(appConfigProvider.future);
+    } catch (_) {}
     try {
       final profile = await ref.read(invoiceRepositoryProvider).getBusinessProfile();
       if (profile != null && mounted) {
@@ -68,10 +74,14 @@ class _InvoiceSetupScreenState extends ConsumerState<InvoiceSetupScreen> {
         _cacNumberController.text = (profile['cac_number'] ?? '').toString();
         _vatEnabled = (profile['vat_enabled'] ?? false) == true;
         _vatRateController.text = ((profile['default_vat_rate'] ?? 0) as num).toString();
-        _currency = (profile['currency'] ?? 'NGN').toString();
-        _paymentTermsController.text = (profile['payment_terms'] ?? 'Due on receipt').toString();
+        _currency = (profile['currency'] ?? config?.invoiceDefaults.currency ?? 'NGN').toString();
+        _paymentTermsController.text = (profile['payment_terms'] ?? config?.invoiceDefaults.paymentTerms ?? 'Due on receipt').toString();
         _logoBase64 = (profile['logo_data'] as String?)?.trim();
         if (_logoBase64 != null && _logoBase64!.isEmpty) _logoBase64 = null;
+      } else if (mounted && config != null) {
+        _vatRateController.text = config.invoiceDefaults.vatRate.toString();
+        _currency = config.invoiceDefaults.currency;
+        _paymentTermsController.text = config.invoiceDefaults.paymentTerms;
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);

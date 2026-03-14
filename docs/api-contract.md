@@ -17,9 +17,13 @@ Base URL: `https://your-domain.com/api`
 ## Config (public)
 
 - `GET /api/config`
-  - returns platform branding for mobile app:
-    - `platform_url` (string) – base URL for API/web
+  - returns platform config for mobile app:
+    - `platform_url` (string) – base URL for web/links
     - `platform_logo_url` (string|null) – logo URL or base64 data URI
+    - `support_email` (string|null)
+    - `support_phone` (string|null)
+    - `invoice_defaults` – `currency`, `vat_rate`, `payment_terms`
+    - `logo_constraints` – `max_size_kb`, `min_dimension`, `max_dimension`
 
 ## Auth (Guest-First)
 
@@ -170,6 +174,7 @@ Base URL: `https://your-domain.com/api`
   - returns 403 if plan invoice limit reached (e.g. `error`: "Invoice limit reached (25/month). Upgrade to Growth or Pro for more.")
 - `GET /api/invoices/by-order?order_id={uuid}` (protected)
   - returns full invoice data for PDF/image generation
+  - when user's plan is in watermark_plans, includes `watermark`: `{ type, logo_url, website_url }`
 
 ## Reminders (Daily Digest)
 
