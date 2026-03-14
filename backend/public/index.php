@@ -30,7 +30,7 @@ if (str_starts_with($uri, '/index.php/')) {
     $uri = '/';
 }
 
-$path = rtrim($uri, '/') ?: '/';
+$path = trim(rtrim($uri, '/') ?: '/');
 if ($path !== '/' && str_starts_with($path, '/oga-tailor/')) {
     $path = substr($path, strlen('/oga-tailor'));
     $path = $path === '' ? '/' : $path;
@@ -481,6 +481,148 @@ if (routeMatches($path, '/api/') && !$isPublicRoute) {
             return;
         }
     }
+}
+
+// Invoice generate - explicit early match (avoids "Route not found" on some server configs)
+if ($method === 'POST' && $path === '/api/invoices/generate') {
+    try {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $data = requestBody();
+    $orderId = trim((string)($data['order_id'] ?? ''));
+
+    if ($orderId === '') {
+        Response::json(['error' => 'order_id is required'], 422);
+        return;
+    }
+
+    $bpStmt = $pdo->prepare(
+        'SELECT business_name, business_phone, business_email, business_address, vat_enabled, default_vat_rate, currency, payment_terms
+         FROM business_profiles
+         WHERE owner_user_id = :owner_user_id AND invoice_setup_completed_at IS NOT NULL
+         LIMIT 1'
+    );
+    $bpStmt->execute([':owner_user_id' => $ownerId]);
+    $bp = $bpStmt->fetch();
+    if (!$bp) {
+        Response::json(['error' => 'Complete invoice setup in Settings before generating invoices'], 403);
+        return;
+    }
+
+    $orderStmt = $pdo->prepare(
+        'SELECT o.id, o.customer_id, o.title, o.amount_total, o.due_date, c.full_name AS customer_name, c.phone_number AS customer_phone
+         FROM orders o
+         INNER JOIN customers c ON c.id = o.customer_id
+         WHERE o.id = :order_id AND o.owner_user_id = :owner_user_id
+         LIMIT 1'
+    );
+    $orderStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
+    $order = $orderStmt->fetch();
+    if (!$order) {
+        Response::json(['error' => 'Order not found'], 404);
+        return;
+    }
+
+    $existingInvoiceStmt = $pdo->prepare('SELECT id, invoice_number FROM invoices WHERE order_id = :order_id AND owner_user_id = :owner_user_id LIMIT 1');
+    $existingInvoiceStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
+    $existingInvoice = $existingInvoiceStmt->fetch();
+    if ($existingInvoice) {
+        Response::json([
+            'message' => 'Invoice already exists for this order',
+            'invoice_id' => $existingInvoice['id'],
+            'invoice_number' => $existingInvoice['invoice_number'],
+        ], 200);
+        return;
+    }
+
+    $planCode = (string)($authUser['plan_code'] ?? 'starter');
+    $settings = planSettings($pdo, $planCode);
+    $invoiceLimit = $settings['invoices_per_month'] ?? null;
+    if ($invoiceLimit !== null) {
+        $monthStart = date('Y-m-01 00:00:00');
+        $countStmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM invoices WHERE owner_user_id = :owner_user_id AND created_at >= :month_start'
+        );
+        $countStmt->execute([':owner_user_id' => $ownerId, ':month_start' => $monthStart]);
+        $invoiceCount = (int)$countStmt->fetchColumn();
+        if ($invoiceCount >= $invoiceLimit) {
+            Response::json([
+                'error' => 'Invoice limit reached (' . $invoiceLimit . '/month). Upgrade to Growth or Pro for more.',
+            ], 403);
+            return;
+        }
+    }
+
+    $seqStmt = $pdo->prepare(
+        'SELECT COALESCE(MAX(CAST(invoice_number AS UNSIGNED)), 0) + 1 AS next_num
+         FROM invoices
+         WHERE owner_user_id = :owner_user_id'
+    );
+    $seqStmt->execute([':owner_user_id' => $ownerId]);
+    $nextNum = (int)$seqStmt->fetchColumn();
+    $invoiceNumber = (string)$nextNum;
+
+    $subtotal = (float)$order['amount_total'];
+    $vatRate = ((int)$bp['vat_enabled']) === 1 ? (float)$bp['default_vat_rate'] : 0;
+    $vatAmount = $subtotal * ($vatRate / 100);
+    $total = $subtotal + $vatAmount;
+    $issuedAt = date('Y-m-d H:i:s');
+    $dueAt = $order['due_date'] ?? null;
+
+    $invoiceId = Uuid::v4();
+    $itemId = Uuid::v4();
+
+    try {
+        $pdo->beginTransaction();
+
+        $invStmt = $pdo->prepare(
+            'INSERT INTO invoices (id, owner_user_id, order_id, invoice_number, subtotal_amount, discount_amount, total_amount, issued_at, due_at, status, created_at, updated_at, last_modified_at)
+             VALUES (:id, :owner_user_id, :order_id, :invoice_number, :subtotal, 0, :total, :issued_at, :due_at, \'issued\', NOW(), NOW(), NOW())'
+        );
+        $invStmt->execute([
+            ':id' => $invoiceId,
+            ':owner_user_id' => $ownerId,
+            ':order_id' => $orderId,
+            ':invoice_number' => $invoiceNumber,
+            ':subtotal' => $subtotal,
+            ':total' => $total,
+            ':issued_at' => $issuedAt,
+            ':due_at' => $dueAt,
+        ]);
+
+        $itemStmt = $pdo->prepare(
+            'INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount, created_at)
+             VALUES (:id, :invoice_id, :description, 1, :unit_price, :amount, NOW())'
+        );
+        $itemStmt->execute([
+            ':id' => $itemId,
+            ':invoice_id' => $invoiceId,
+            ':description' => (string)$order['title'],
+            ':unit_price' => $subtotal,
+            ':amount' => $subtotal,
+        ]);
+
+        $pdo->commit();
+    } catch (\Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        Response::json(['error' => 'Failed to create invoice: ' . $e->getMessage()], 500);
+        return;
+    }
+
+    Response::json([
+        'message' => 'Invoice generated',
+        'invoice_id' => $invoiceId,
+        'invoice_number' => $invoiceNumber,
+        'order_id' => $orderId,
+        'total_amount' => $total,
+        'currency' => (string)$bp['currency'],
+    ], 201);
+    } catch (\Throwable $e) {
+        error_log('Invoice generate error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        Response::json(['error' => 'Failed to generate invoice. Please try again.'], 500);
+    }
+    return;
 }
 
 if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
@@ -1351,9 +1493,17 @@ if ($method === 'POST' && routeMatches($path, '/api/customers/archive')) {
              WHERE id = :id AND owner_user_id = :owner_user_id'
         );
     } else {
+        // Remove only the leading [ARCHIVED] or [ARCHIVED]  prefix (preserves [ARCHIVED] if in middle of notes)
         $stmt = $pdo->prepare(
             'UPDATE customers
-             SET notes = TRIM(REPLACE(COALESCE(notes, \'\'), \'[ARCHIVED]\', \'\')),
+             SET notes = TRIM(
+                   CASE
+                     WHEN COALESCE(notes, \'\') LIKE \'[ARCHIVED] %\' THEN SUBSTRING(notes, 12)
+                     WHEN COALESCE(notes, \'\') = \'[ARCHIVED]\' THEN \'\'
+                     WHEN COALESCE(notes, \'\') LIKE \'[ARCHIVED]%\' THEN SUBSTRING(notes, 11)
+                     ELSE COALESCE(notes, \'\')
+                   END
+                 ),
                  updated_at = NOW(),
                  last_modified_at = NOW()
              WHERE id = :id AND owner_user_id = :owner_user_id'
@@ -1940,141 +2090,6 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
     }
     Response::json(['message' => 'Invoice setup completed']);
     return;
-}
-
-if ($method === 'POST' && routeMatches($path, '/api/invoices/generate')) {
-    $ownerId = (string)($authUser['id'] ?? '');
-    $data = requestBody();
-    $orderId = trim((string)($data['order_id'] ?? ''));
-
-    if ($orderId === '') {
-        Response::json(['error' => 'order_id is required'], 422);
-        return;
-    }
-
-    $bpStmt = $pdo->prepare(
-        'SELECT business_name, business_phone, business_email, business_address, vat_enabled, default_vat_rate, currency, payment_terms
-         FROM business_profiles
-         WHERE owner_user_id = :owner_user_id AND invoice_setup_completed_at IS NOT NULL
-         LIMIT 1'
-    );
-    $bpStmt->execute([':owner_user_id' => $ownerId]);
-    $bp = $bpStmt->fetch();
-    if (!$bp) {
-        Response::json(['error' => 'Complete invoice setup in Settings before generating invoices'], 403);
-        return;
-    }
-
-    $orderStmt = $pdo->prepare(
-        'SELECT o.id, o.customer_id, o.title, o.amount_total, o.due_date, c.full_name AS customer_name, c.phone_number AS customer_phone
-         FROM orders o
-         INNER JOIN customers c ON c.id = o.customer_id
-         WHERE o.id = :order_id AND o.owner_user_id = :owner_user_id
-         LIMIT 1'
-    );
-    $orderStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
-    $order = $orderStmt->fetch();
-    if (!$order) {
-        Response::json(['error' => 'Order not found'], 404);
-        return;
-    }
-
-    $existingInvoiceStmt = $pdo->prepare('SELECT id, invoice_number FROM invoices WHERE order_id = :order_id AND owner_user_id = :owner_user_id LIMIT 1');
-    $existingInvoiceStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
-    $existingInvoice = $existingInvoiceStmt->fetch();
-    if ($existingInvoice) {
-        Response::json([
-            'message' => 'Invoice already exists for this order',
-            'invoice_id' => $existingInvoice['id'],
-            'invoice_number' => $existingInvoice['invoice_number'],
-        ], 200);
-        return;
-    }
-
-    $planCode = (string)($authUser['plan_code'] ?? 'starter');
-    $settings = planSettings($pdo, $planCode);
-    $invoiceLimit = $settings['invoices_per_month'] ?? null;
-    if ($invoiceLimit !== null) {
-        $monthStart = date('Y-m-01 00:00:00');
-        $countStmt = $pdo->prepare(
-            'SELECT COUNT(*) FROM invoices WHERE owner_user_id = :owner_user_id AND created_at >= :month_start'
-        );
-        $countStmt->execute([':owner_user_id' => $ownerId, ':month_start' => $monthStart]);
-        $invoiceCount = (int)$countStmt->fetchColumn();
-        if ($invoiceCount >= $invoiceLimit) {
-            Response::json([
-                'error' => 'Invoice limit reached (' . $invoiceLimit . '/month). Upgrade to Growth or Pro for more.',
-            ], 403);
-            return;
-        }
-    }
-
-    $seqStmt = $pdo->prepare(
-        'SELECT COALESCE(MAX(CAST(invoice_number AS UNSIGNED)), 0) + 1 AS next_num
-         FROM invoices
-         WHERE owner_user_id = :owner_user_id'
-    );
-    $seqStmt->execute([':owner_user_id' => $ownerId]);
-    $nextNum = (int)$seqStmt->fetchColumn();
-    $invoiceNumber = (string)$nextNum;
-
-    $subtotal = (float)$order['amount_total'];
-    $vatRate = ((int)$bp['vat_enabled']) === 1 ? (float)$bp['default_vat_rate'] : 0;
-    $vatAmount = $subtotal * ($vatRate / 100);
-    $total = $subtotal + $vatAmount;
-    $issuedAt = date('Y-m-d H:i:s');
-    $dueAt = $order['due_date'] ?? null;
-
-    $invoiceId = Uuid::v4();
-    $itemId = Uuid::v4();
-
-    try {
-        $pdo->beginTransaction();
-
-        $invStmt = $pdo->prepare(
-            'INSERT INTO invoices (id, owner_user_id, order_id, invoice_number, subtotal_amount, discount_amount, total_amount, issued_at, due_at, status, created_at, updated_at, last_modified_at)
-             VALUES (:id, :owner_user_id, :order_id, :invoice_number, :subtotal, 0, :total, :issued_at, :due_at, \'issued\', NOW(), NOW(), NOW())'
-        );
-        $invStmt->execute([
-            ':id' => $invoiceId,
-            ':owner_user_id' => $ownerId,
-            ':order_id' => $orderId,
-            ':invoice_number' => $invoiceNumber,
-            ':subtotal' => $subtotal,
-            ':total' => $total,
-            ':issued_at' => $issuedAt,
-            ':due_at' => $dueAt,
-        ]);
-
-        $itemStmt = $pdo->prepare(
-            'INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount, created_at)
-             VALUES (:id, :invoice_id, :description, 1, :unit_price, :amount, NOW())'
-        );
-        $itemStmt->execute([
-            ':id' => $itemId,
-            ':invoice_id' => $invoiceId,
-            ':description' => (string)$order['title'],
-            ':unit_price' => $subtotal,
-            ':amount' => $subtotal,
-        ]);
-
-        $pdo->commit();
-    } catch (\Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        Response::json(['error' => 'Failed to create invoice: ' . $e->getMessage()], 500);
-        return;
-    }
-
-    Response::json([
-        'message' => 'Invoice generated',
-        'invoice_id' => $invoiceId,
-        'invoice_number' => $invoiceNumber,
-        'order_id' => $orderId,
-        'total_amount' => $total,
-        'currency' => (string)$bp['currency'],
-    ], 201);
 }
 
 if ($method === 'GET' && routeMatches($path, '/api/invoices/by-order')) {

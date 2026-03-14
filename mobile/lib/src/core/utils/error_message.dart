@@ -2,10 +2,14 @@ import 'package:dio/dio.dart';
 
 String userFriendlyError(Object error, {String fallback = 'Something went wrong. Please try again.'}) {
   if (error is DioException) {
+    final statusCode = error.response?.statusCode;
+    // Prefer status-based messages over parse errors (e.g. 500 HTML error page)
+    if (statusCode == 500) {
+      return 'Server is currently unavailable. Please try again shortly.';
+    }
     if (error.error is FormatException) {
       return 'Invalid response from server. Please try again.';
     }
-    final statusCode = error.response?.statusCode;
     if (error.type == DioExceptionType.connectionTimeout ||
         error.type == DioExceptionType.sendTimeout ||
         error.type == DioExceptionType.receiveTimeout) {
