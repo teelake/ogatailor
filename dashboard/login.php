@@ -5,7 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/config.php';
 
 if (adminLoggedIn()) {
-    header('Location: index.php');
+    $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+    header('Location: ' . ($base ?: '/') . '/');
     exit;
 }
 
@@ -31,7 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['admin_email'] = $admin['email'];
             $_SESSION['admin_name'] = $admin['full_name'];
             $_SESSION['admin_profile_picture'] = $admin['profile_picture'] ?? null;
-            header('Location: index.php');
+            $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+            header('Location: ' . ($base ?: '/') . '/');
             exit;
         }
     }

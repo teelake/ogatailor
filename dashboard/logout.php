@@ -11,5 +11,6 @@ if (ini_get('session.use_cookies')) {
 }
 session_destroy();
 
-header('Location: login.php');
+$base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+header('Location: ' . ($base ?: '/') . '/login');
 exit;

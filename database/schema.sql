@@ -264,5 +264,18 @@ INSERT INTO platform_settings (setting_key, setting_value, updated_at) VALUES
   ('reminder_days_before_due', '3', NOW()),
   ('logo_max_size_kb', '500', NOW()),
   ('logo_min_dimension', '64', NOW()),
-  ('logo_max_dimension', '512', NOW())
+  ('logo_max_dimension', '512', NOW()),
+  ('paystack_secret_key', NULL, NOW()),
+  ('paystack_public_key', NULL, NOW()),
+  ('paystack_test_mode', '1', NOW()),
+  ('sms_provider', NULL, NOW()),
+  ('sms_api_key', NULL, NOW()),
+  ('email_provider', NULL, NOW()),
+  ('email_api_key', NULL, NOW()),
+  ('platform_support_email', NULL, NOW()),
+  ('platform_support_phone', NULL, NOW()),
+  ('watermark_type', 'both', NOW()),
+  ('watermark_logo_url', NULL, NOW()),
+  ('watermark_website_url', 'https://ogatailor.app', NOW()),
+  ('watermark_plans', 'starter', NOW())
 ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);

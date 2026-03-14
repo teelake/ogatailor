@@ -2,15 +2,17 @@
 $admin = adminUser();
 $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
 $base = $base ?: '/';
-$current = basename($_SERVER['SCRIPT_NAME'] ?? 'index.php');
+$path = trim(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
+$segments = $path ? explode('/', $path) : [];
+$last = end($segments);
+$currentPage = ($last === false || $last === '' || $last === 'dashboard') ? 'index' : preg_replace('/\.php$/', '', $last);
 $navItems = [
-    'Overview' => ['index.php', '◉'],
-    'Reports' => ['reports.php', '▣'],
-    'Configuration' => ['configuration.php', '◇'],
-    'Admins' => ['admins.php', '◎'],
-    'Profile' => ['profile.php', '●'],
+    'Overview' => ['', '◉'],
+    'Reports' => ['reports', '▣'],
+    'Configuration' => ['configuration', '◇'],
+    'Admins' => ['admins', '◎'],
+    'Profile' => ['profile', '●'],
 ];
-$currentBase = preg_replace('/\?.*/', '', $current) ?: $current;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -27,7 +29,7 @@ $currentBase = preg_replace('/\?.*/', '', $current) ?: $current;
         <nav class="sidebar-nav">
             <div class="nav-section">Main</div>
             <?php foreach ($navItems as $label => [$url, $icon]): ?>
-            <a href="<?= $url ?>" class="nav-item <?= $currentBase === $url ? 'active' : '' ?>">
+            <a href="<?= $base . ($url ? '/' . $url : '') ?>" class="nav-item <?= $currentPage === ($url ?: 'index') ? 'active' : '' ?>">
                 <span class="icon"><?= $icon ?></span>
                 <?= escapeHtml($label) ?>
             </a>
@@ -45,7 +47,7 @@ $currentBase = preg_replace('/\?.*/', '', $current) ?: $current;
                     <div class="admin-email"><?= escapeHtml($admin['email'] ?? '') ?></div>
                 </div>
             </div>
-            <a href="logout.php" class="btn-logout">Sign out</a>
+            <a href="<?= $base ?>/logout" class="btn-logout">Sign out</a>
         </div>
     </aside>
     <main class="main-content">

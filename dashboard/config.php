@@ -27,7 +27,8 @@ function adminLoggedIn(): bool
 function requireAdmin(): void
 {
     if (!adminLoggedIn()) {
-        header('Location: login.php');
+        $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+        header('Location: ' . ($base ?: '/') . '/login');
         exit;
     }
 }

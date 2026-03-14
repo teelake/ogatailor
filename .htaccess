@@ -4,12 +4,18 @@ DirectoryIndex index.php
     RewriteEngine On
     RewriteBase /oga-tailor/
 
-    RewriteRule ^$ dashboard/index.php [R=301,L]
-    RewriteRule ^index\.html$ dashboard/index.php [R=301,L]
-    RewriteRule ^dashboard/?$ dashboard/index.php [R=301,L]
-    RewriteRule ^admin/?$ dashboard/index.php [R=301,L]
+    RewriteRule ^$ dashboard/ [R=301,L]
+    RewriteRule ^index\.html$ dashboard/ [R=301,L]
+    RewriteRule ^admin/?$ dashboard/ [R=301,L]
 
-    RewriteRule ^dashboard/.*\.php$ - [L]
+    # Dashboard clean URLs (no .php in browser)
+    RewriteRule ^dashboard/?$ dashboard/index.php [L]
+    RewriteRule ^dashboard/login/?$ dashboard/login.php [L]
+    RewriteRule ^dashboard/logout/?$ dashboard/logout.php [L]
+    RewriteRule ^dashboard/profile/?$ dashboard/profile.php [L]
+    RewriteRule ^dashboard/reports/?$ dashboard/reports.php [L]
+    RewriteRule ^dashboard/configuration/?$ dashboard/configuration.php [L]
+    RewriteRule ^dashboard/admins/?$ dashboard/admins.php [L]
 
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
