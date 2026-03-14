@@ -4,53 +4,103 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Oga Tailor Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/oga-tailor/admin/styles.css" />
 </head>
 <body>
-  <main class="shell">
-    <section class="card auth">
-      <h1>Oga Tailor Admin</h1>
-      <p>Enter your API token to load your dashboard.</p>
-      <input id="token" type="password" placeholder="Bearer token" />
-      <button id="loadBtn">Load Dashboard</button>
-      <p id="authMsg" class="muted"></p>
-    </section>
+  <div id="app">
+    <main id="login-page" class="page">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="logo">Oga Tailor</div>
+          <h1>Admin</h1>
+          <p>Sign in to manage your platform</p>
+        </div>
+        <form id="login-form" class="login-form">
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" type="email" name="email" placeholder="admin@ogatailor.app" autocomplete="email" required />
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" type="password" name="password" placeholder="••••••••" autocomplete="current-password" required />
+          </div>
+          <p id="login-error" class="error hidden"></p>
+          <button type="submit" id="login-btn" class="btn btn-primary">Sign in</button>
+        </form>
+      </div>
+    </main>
 
-    <section id="dashboard" class="hidden">
-      <div class="topbar">
-        <h2>Business Overview</h2>
-        <label class="inline">
-          Upcoming rows
-          <select id="upcomingLimit">
-            <option value="8">8</option>
-            <option value="12">12</option>
-            <option value="20">20</option>
-          </select>
-        </label>
+    <main id="dashboard-page" class="page hidden">
+      <aside class="sidebar">
+        <div class="sidebar-brand">Oga Tailor</div>
+        <nav class="sidebar-nav">
+          <a href="#" class="nav-item active" data-section="overview">
+            <span class="nav-icon">◉</span>
+            Overview
+          </a>
+          <a href="#" class="nav-item" data-section="plans">
+            <span class="nav-icon">◇</span>
+            Plans
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="admin-info">
+            <span id="admin-email" class="admin-email"></span>
+            <button type="button" id="logout-btn" class="btn-logout">Sign out</button>
+          </div>
+        </div>
+      </aside>
+      <div class="main-content">
+        <header class="topbar">
+          <h2 id="page-title">Overview</h2>
+        </header>
+        <div id="overview-section" class="section">
+          <div class="stats-grid">
+            <article class="stat-card">
+              <span class="stat-label">Users</span>
+              <span id="stat-users" class="stat-value">0</span>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Customers</span>
+              <span id="stat-customers" class="stat-value">0</span>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Measurements</span>
+              <span id="stat-measurements" class="stat-value">0</span>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Orders</span>
+              <span id="stat-orders" class="stat-value">0</span>
+            </article>
+          </div>
+          <div class="cards-grid">
+            <article class="card">
+              <h3>Order Status Breakdown</h3>
+              <div id="status-bars" class="bars"></div>
+              <ul id="status-list" class="status-list"></ul>
+            </article>
+            <article class="card">
+              <div class="card-header">
+                <h3>Upcoming Due Orders</h3>
+                <select id="upcoming-limit">
+                  <option value="8">8</option>
+                  <option value="12">12</option>
+                  <option value="20">20</option>
+                </select>
+              </div>
+              <ul id="upcoming-list" class="upcoming-list"></ul>
+            </article>
+          </div>
+        </div>
+        <div id="plans-section" class="section hidden">
+          <div id="plans-grid" class="plans-grid"></div>
+        </div>
       </div>
-      <div class="stats">
-        <article class="card stat"><h3>Plan</h3><p id="planVal">-</p></article>
-        <article class="card stat"><h3>Customers</h3><p id="customersVal">0</p></article>
-        <article class="card stat"><h3>Measurements</h3><p id="measurementsVal">0</p></article>
-      </div>
-      <div class="grid">
-        <article class="card">
-          <h3>Order Status Breakdown</h3>
-          <ul id="statuses"></ul>
-          <div id="statusBars" class="bars"></div>
-        </article>
-        <article class="card">
-          <h3>Upcoming Due Orders</h3>
-          <ul id="upcoming"></ul>
-        </article>
-      </div>
-
-      <div class="topbar">
-        <h2>Plan Configuration</h2>
-      </div>
-      <div id="plansGrid" class="grid"></div>
-    </section>
-  </main>
+    </main>
+  </div>
   <script src="/oga-tailor/admin/app.js"></script>
 </body>
 </html>

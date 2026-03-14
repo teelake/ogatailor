@@ -30,7 +30,7 @@ Offline-first customer measurement management for seamstresses, tailors, and fas
 - `database/` - SQL schema and seed scripts
 - `docs/` - API and architecture notes
 - `mobile/` - Flutter app codebase (theme + customers MVP screen)
-- `admin/` - Web admin dashboard UI (token-authenticated via API)
+- `dashboard/` - PHP admin panel (HTML, CSS, JS, PHP, MySQL) — email/password login, platform stats, plan config
 
 ## Quick Start (Backend)
 

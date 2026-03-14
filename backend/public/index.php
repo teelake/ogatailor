@@ -31,6 +31,10 @@ if (str_starts_with($uri, '/index.php/')) {
 }
 
 $path = rtrim($uri, '/') ?: '/';
+if ($path !== '/' && str_starts_with($path, '/oga-tailor/')) {
+    $path = substr($path, strlen('/oga-tailor'));
+    $path = $path === '' ? '/' : $path;
+}
 
 if ($method === 'OPTIONS') {
     http_response_code(204);
@@ -94,6 +98,44 @@ function bearerToken(): ?string
         return null;
     }
     return trim(substr($raw, 7));
+}
+
+function authenticatedAdmin(\PDO $pdo): ?array
+{
+    $token = bearerToken();
+    if ($token === null || $token === '') {
+        return null;
+    }
+    $tokenHash = hash('sha256', $token);
+    $stmt = $pdo->prepare(
+        'SELECT a.id, a.email, a.full_name
+         FROM admin_sessions s
+         INNER JOIN admin_users a ON a.id = s.admin_user_id
+         WHERE s.token_hash = :token_hash AND s.expires_at > NOW()
+         LIMIT 1'
+    );
+    $stmt->execute([':token_hash' => $tokenHash]);
+    $admin = $stmt->fetch();
+    return $admin ?: null;
+}
+
+function issueAdminToken(\PDO $pdo, string $adminId): string
+{
+    $plainToken = bin2hex(random_bytes(32));
+    $tokenHash = hash('sha256', $plainToken);
+    $expiresAt = (new \DateTimeImmutable('now'))
+        ->modify('+7 days')
+        ->format('Y-m-d H:i:s');
+    $stmt = $pdo->prepare(
+        'INSERT INTO admin_sessions (admin_user_id, token_hash, expires_at, created_at)
+         VALUES (:admin_user_id, :token_hash, :expires_at, NOW())'
+    );
+    $stmt->execute([
+        ':admin_user_id' => $adminId,
+        ':token_hash' => $tokenHash,
+        ':expires_at' => $expiresAt,
+    ]);
+    return $plainToken;
 }
 
 function authenticatedUser(\PDO $pdo): ?array
@@ -288,14 +330,84 @@ $isPublicRoute = ($method === 'GET' && ($path === '/' || routeMatches($path, '/h
     routeMatches($path, '/api/auth/register') ||
     routeMatches($path, '/api/auth/login') ||
     routeMatches($path, '/api/auth/forgot-password') ||
-    routeMatches($path, '/api/auth/reset-password');
+    routeMatches($path, '/api/auth/reset-password') ||
+    ($method === 'POST' && routeMatches($path, '/api/admin/login'));
 
-$authUser = null;
-if (routeMatches($path, '/api/') && !$isPublicRoute) {
-    $authUser = authenticatedUser($pdo);
-    if (!$authUser) {
+$isAdminRoute = routeMatches($path, '/api/admin/dashboard') ||
+    routeMatches($path, '/api/admin/plans') ||
+    routeMatches($path, '/api/admin/logout');
+
+if ($method === 'GET' && routeMatches($path, '/api/reminders/send-digests')) {
+    $cronSecret = (string)\App\Config\Env::get('CRON_SECRET', '');
+    $provided = $_GET['secret'] ?? $_GET['cron_secret'] ?? '';
+    if ($cronSecret === '' || $provided !== $cronSecret) {
         Response::json(['error' => 'Unauthorized'], 401);
         return;
+    }
+    try {
+        $stmt = $pdo->query(
+            'SELECT u.id, u.full_name, u.email FROM users u
+             WHERE u.email_digest_enabled = 1 AND u.email IS NOT NULL AND u.is_guest = 0'
+        );
+        $users = $stmt->fetchAll();
+        $from = (string)\App\Config\Env::get('WELCOME_EMAIL_FROM', 'no-reply@ogatailor.app');
+        $sent = 0;
+        foreach ($users as $user) {
+            $ordersStmt = $pdo->prepare(
+                'SELECT o.title, o.due_date, c.full_name AS customer_name
+                 FROM orders o
+                 INNER JOIN customers c ON c.id = o.customer_id
+                 WHERE o.owner_user_id = :owner_user_id
+                   AND o.status NOT IN (\'delivered\', \'cancelled\')
+                   AND o.due_date >= CURDATE()
+                   AND o.due_date <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
+                 ORDER BY o.due_date ASC
+                 LIMIT 20'
+            );
+            $ordersStmt->execute([':owner_user_id' => $user['id']]);
+            $orders = $ordersStmt->fetchAll();
+            if (empty($orders)) {
+                continue;
+            }
+            $lines = ["Hi {$user['full_name']},\n\nYour upcoming orders:\n\n"];
+            foreach ($orders as $o) {
+                $due = date('D, j M Y', strtotime($o['due_date']));
+                $lines[] = "- {$o['title']} for {$o['customer_name']} — Due {$due}\n";
+            }
+            $lines[] = "\n— Oga Tailor";
+            $body = implode('', $lines);
+            $subject = 'Oga Tailor: Your upcoming orders';
+            $headers = [
+                'MIME-Version: 1.0',
+                'Content-Type: text/plain; charset=UTF-8',
+                "From: Oga Tailor <{$from}>",
+            ];
+            @mail($user['email'], $subject, $body, implode("\r\n", $headers));
+            $sent++;
+        }
+        Response::json(['message' => "Digest sent to {$sent} users", 'sent' => $sent]);
+    } catch (\Throwable $e) {
+        error_log('send_digests_failed: ' . $e->getMessage());
+        Response::json(['error' => $e->getMessage()], 500);
+    }
+    return;
+}
+
+$authUser = null;
+$adminUser = null;
+if (routeMatches($path, '/api/') && !$isPublicRoute) {
+    if ($isAdminRoute) {
+        $adminUser = authenticatedAdmin($pdo);
+        if (!$adminUser) {
+            Response::json(['error' => 'Unauthorized'], 401);
+            return;
+        }
+    } else {
+        $authUser = authenticatedUser($pdo);
+        if (!$authUser) {
+            Response::json(['error' => 'Unauthorized'], 401);
+            return;
+        }
     }
 }
 
@@ -356,6 +468,41 @@ function validateCacNumber(string $cac): bool
     $prefix = substr($cac, 0, 2);
     $rest = substr($cac, 2);
     return in_array($prefix, ['BN', 'RC'], true) && ctype_digit($rest);
+}
+
+/**
+ * Validate logo: base64 PNG/JPEG/WEBP, max 500KB decoded, dimensions 64-512px.
+ * Returns [valid: bool, error: ?string].
+ */
+function validateLogo(?string $base64): array
+{
+    if ($base64 === null || trim($base64) === '') {
+        return [true, null];
+    }
+    $raw = base64_decode(str_replace([' ', "\r", "\n"], '', $base64), true);
+    if ($raw === false || strlen($raw) === 0) {
+        return [false, 'Logo must be valid base64'];
+    }
+    if (strlen($raw) > 512 * 1024) {
+        return [false, 'Logo must be under 500KB'];
+    }
+    $finfo = new \finfo(FILEINFO_MIME_TYPE);
+    $mime = $finfo->buffer($raw);
+    $allowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (!in_array($mime, $allowed, true)) {
+        return [false, 'Logo must be PNG, JPEG or WEBP'];
+    }
+    $img = @imagecreatefromstring($raw);
+    if ($img === false) {
+        return [false, 'Logo must be a valid image file'];
+    }
+    $w = imagesx($img);
+    $h = imagesy($img);
+    imagedestroy($img);
+    if ($w < 64 || $h < 64 || $w > 512 || $h > 512) {
+        return [false, 'Logo must be between 64x64 and 512x512 pixels'];
+    }
+    return [true, null];
 }
 
 if ($method === 'POST' && routeMatches($path, '/api/auth/register')) {
@@ -829,9 +976,11 @@ if ($method === 'GET' && routeMatches($path, '/api/customers')) {
         $rowsSql .= ' AND notes LIKE \'[ARCHIVED]%\'';
     }
     if ($query !== '') {
-        $countSql .= ' AND (LOWER(full_name) LIKE :q OR phone_number LIKE :q)';
-        $rowsSql .= ' AND (LOWER(full_name) LIKE :q OR phone_number LIKE :q)';
-        $params[':q'] = '%' . strtolower($query) . '%';
+        $qVal = '%' . strtolower($query) . '%';
+        $countSql .= ' AND (LOWER(full_name) LIKE :q1 OR phone_number LIKE :q2)';
+        $rowsSql .= ' AND (LOWER(full_name) LIKE :q1 OR phone_number LIKE :q2)';
+        $params[':q1'] = $qVal;
+        $params[':q2'] = $qVal;
     }
     if ($startsWith !== '') {
         $countSql .= ' AND LOWER(full_name) LIKE :starts_with';
@@ -1419,7 +1568,7 @@ if ($method === 'GET' && routeMatches($path, '/api/business-profile')) {
     $stmt = $pdo->prepare(
         'SELECT id, owner_user_id, business_name, business_phone, business_email, business_address,
                 cac_registered, cac_registration_type, cac_number, vat_enabled, default_vat_rate,
-                currency, payment_terms, invoice_setup_completed_at, created_at, updated_at
+                currency, payment_terms, logo_data, invoice_setup_completed_at, created_at, updated_at
          FROM business_profiles
          WHERE owner_user_id = :owner_user_id
          LIMIT 1'
@@ -1449,6 +1598,22 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
     $defaultVatRate = (float)($data['default_vat_rate'] ?? 0);
     $currency = strtoupper(trim((string)($data['currency'] ?? 'NGN')));
     $paymentTerms = trim((string)($data['payment_terms'] ?? ''));
+    $logoData = null;
+    $updateLogo = false;
+    if (array_key_exists('logo_data', $data)) {
+        $logoData = trim((string)($data['logo_data'] ?? ''));
+        if ($logoData === '') {
+            $logoData = null;
+        }
+        $updateLogo = true;
+        if ($logoData !== null) {
+            [$logoValid, $logoError] = validateLogo($logoData);
+            if (!$logoValid) {
+                Response::json(['error' => $logoError], 422);
+                return;
+            }
+        }
+    }
 
     if ($businessName === '') {
         Response::json(['error' => 'business_name is required'], 422);
@@ -1486,17 +1651,19 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
 
     $now = date('Y-m-d H:i:s');
     if ($existing) {
+        $logoClause = $updateLogo ? ', logo_data = :logo_data' : '';
         $stmt = $pdo->prepare(
             'UPDATE business_profiles
              SET business_name = :business_name, business_phone = :business_phone, business_email = :business_email,
                  business_address = :business_address, cac_registered = :cac_registered,
                  cac_registration_type = :cac_registration_type, cac_number = :cac_number,
                  vat_enabled = :vat_enabled, default_vat_rate = :default_vat_rate,
-                 currency = :currency, payment_terms = :payment_terms,
+                 currency = :currency, payment_terms = :payment_terms'
+            . $logoClause . ',
                  invoice_setup_completed_at = :invoice_setup_completed_at, updated_at = :updated_at
              WHERE owner_user_id = :owner_user_id'
         );
-        $stmt->execute([
+        $params = [
             ':owner_user_id' => $ownerId,
             ':business_name' => $businessName,
             ':business_phone' => $businessPhone !== '' ? $businessPhone : null,
@@ -1511,16 +1678,20 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
             ':payment_terms' => $paymentTerms !== '' ? $paymentTerms : null,
             ':invoice_setup_completed_at' => $now,
             ':updated_at' => $now,
-        ]);
+        ];
+        if ($updateLogo) {
+            $params[':logo_data'] = $logoData;
+        }
+        $stmt->execute($params);
     } else {
         $profileId = Uuid::v4();
         $stmt = $pdo->prepare(
             'INSERT INTO business_profiles (id, owner_user_id, business_name, business_phone, business_email, business_address,
                     cac_registered, cac_registration_type, cac_number, vat_enabled, default_vat_rate,
-                    currency, payment_terms, invoice_setup_completed_at, created_at, updated_at)
+                    currency, payment_terms, logo_data, invoice_setup_completed_at, created_at, updated_at)
              VALUES (:id, :owner_user_id, :business_name, :business_phone, :business_email, :business_address,
                     :cac_registered, :cac_registration_type, :cac_number, :vat_enabled, :default_vat_rate,
-                    :currency, :payment_terms, :invoice_setup_completed_at, :created_at, :updated_at)'
+                    :currency, :payment_terms, :logo_data, :invoice_setup_completed_at, :created_at, :updated_at)'
         );
         $stmt->execute([
             ':id' => $profileId,
@@ -1536,6 +1707,7 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
             ':default_vat_rate' => $defaultVatRate,
             ':currency' => $currency !== '' ? $currency : 'NGN',
             ':payment_terms' => $paymentTerms !== '' ? $paymentTerms : null,
+            ':logo_data' => $logoData,
             ':invoice_setup_completed_at' => $now,
             ':created_at' => $now,
             ':updated_at' => $now,
@@ -1674,7 +1846,7 @@ if ($method === 'GET' && routeMatches($path, '/api/invoices/by-order')) {
         'SELECT i.id, i.order_id, i.invoice_number, i.subtotal_amount, i.discount_amount, i.total_amount,
                 i.issued_at, i.due_at, i.status,
                 bp.business_name, bp.business_phone, bp.business_email, bp.business_address,
-                bp.currency, bp.vat_enabled, bp.default_vat_rate, bp.payment_terms,
+                bp.currency, bp.vat_enabled, bp.default_vat_rate, bp.payment_terms, bp.logo_data,
                 o.title AS order_title, o.amount_total AS order_amount, o.notes AS order_notes,
                 c.full_name AS customer_name, c.phone_number AS customer_phone'
         . ' FROM invoices i'
@@ -1698,6 +1870,57 @@ if ($method === 'GET' && routeMatches($path, '/api/invoices/by-order')) {
     $invoice['items'] = $itemsStmt->fetchAll();
 
     Response::json(['data' => $invoice]);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/reminders/daily-digest/subscribe')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $planCode = (string)($authUser['plan_code'] ?? 'starter');
+    if (!in_array($planCode, ['growth', 'pro'], true)) {
+        Response::json(['error' => 'Daily email digest is available on Growth/Pro plan only'], 403);
+        return;
+    }
+    try {
+        $stmt = $pdo->prepare('UPDATE users SET email_digest_enabled = 1 WHERE id = :id');
+        $stmt->execute([':id' => $ownerId]);
+    } catch (\Throwable $e) {
+        if (str_contains($e->getMessage(), 'email_digest_enabled')) {
+            Response::json(['error' => 'Email digest not available. Run migration 005.'], 500);
+            return;
+        }
+        throw $e;
+    }
+    Response::json(['message' => 'Subscribed to daily email digest']);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/reminders/daily-digest/unsubscribe')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    try {
+        $stmt = $pdo->prepare('UPDATE users SET email_digest_enabled = 0 WHERE id = :id');
+        $stmt->execute([':id' => $ownerId]);
+    } catch (\Throwable $e) {
+        if (str_contains($e->getMessage(), 'email_digest_enabled')) {
+            Response::json(['message' => 'Unsubscribed']);
+            return;
+        }
+        throw $e;
+    }
+    Response::json(['message' => 'Unsubscribed from daily email digest']);
+    return;
+}
+
+if ($method === 'GET' && routeMatches($path, '/api/reminders/daily-digest/status')) {
+    $ownerId = (string)($authUser['id'] ?? '');
+    try {
+        $stmt = $pdo->prepare('SELECT email_digest_enabled FROM users WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $ownerId]);
+        $row = $stmt->fetch();
+        $enabled = $row && ((int)($row['email_digest_enabled'] ?? 0)) === 1;
+    } catch (\Throwable $e) {
+        $enabled = false;
+    }
+    Response::json(['email_digest_enabled' => $enabled]);
     return;
 }
 
@@ -1765,53 +1988,85 @@ if ($method === 'GET' && routeMatches($path, '/api/export/measurements')) {
     return;
 }
 
+if ($method === 'POST' && routeMatches($path, '/api/admin/login')) {
+    $data = requestBody();
+    $email = strtolower(trim((string)($data['email'] ?? '')));
+    $password = (string)($data['password'] ?? '');
+    if ($email === '' || $password === '') {
+        Response::json(['error' => 'email and password are required'], 422);
+        return;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT id, password_hash, full_name FROM admin_users WHERE email = :email LIMIT 1'
+    );
+    $stmt->execute([':email' => $email]);
+    $admin = $stmt->fetch();
+    if (!$admin || !password_verify($password, (string)$admin['password_hash'])) {
+        Response::json(['error' => 'Invalid email or password'], 401);
+        return;
+    }
+    $token = issueAdminToken($pdo, (string)$admin['id']);
+    Response::json([
+        'token' => $token,
+        'admin' => [
+            'id' => $admin['id'],
+            'email' => $email,
+            'full_name' => $admin['full_name'],
+        ],
+    ]);
+    return;
+}
+
+if ($method === 'POST' && routeMatches($path, '/api/admin/logout')) {
+    $token = bearerToken();
+    if ($token !== null && $token !== '') {
+        $tokenHash = hash('sha256', $token);
+        $pdo->prepare('DELETE FROM admin_sessions WHERE token_hash = :token_hash')
+            ->execute([':token_hash' => $tokenHash]);
+    }
+    Response::json(['message' => 'Logged out']);
+    return;
+}
+
 if ($method === 'GET' && routeMatches($path, '/api/admin/dashboard')) {
-    $ownerId = (string)($authUser['id'] ?? '');
-    $planCode = (string)($authUser['plan_code'] ?? 'starter');
     $upcomingLimit = max(1, min(30, (int)($_GET['upcoming_limit'] ?? 8)));
 
-    $customerCountStmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE owner_user_id = :owner_user_id');
-    $customerCountStmt->execute([':owner_user_id' => $ownerId]);
+    $userCountStmt = $pdo->query('SELECT COUNT(*) FROM users WHERE is_guest = 0');
+    $userCount = (int)$userCountStmt->fetchColumn();
+
+    $customerCountStmt = $pdo->query('SELECT COUNT(*) FROM customers');
     $customerCount = (int)$customerCountStmt->fetchColumn();
 
-    $measurementCountStmt = $pdo->prepare(
-        'SELECT COUNT(*)
-         FROM measurements m
-         INNER JOIN customers c ON c.id = m.customer_id
-         WHERE c.owner_user_id = :owner_user_id'
-    );
-    $measurementCountStmt->execute([':owner_user_id' => $ownerId]);
+    $measurementCountStmt = $pdo->query('SELECT COUNT(*) FROM measurements');
     $measurementCount = (int)$measurementCountStmt->fetchColumn();
 
-    $orderStatusStmt = $pdo->prepare(
-        'SELECT status, COUNT(*) AS total
-         FROM orders
-         WHERE owner_user_id = :owner_user_id
-         GROUP BY status'
+    $orderCountStmt = $pdo->query('SELECT COUNT(*) FROM orders');
+    $orderCount = (int)$orderCountStmt->fetchColumn();
+
+    $orderStatusStmt = $pdo->query(
+        'SELECT status, COUNT(*) AS total FROM orders GROUP BY status'
     );
-    $orderStatusStmt->execute([':owner_user_id' => $ownerId]);
     $orderStatuses = $orderStatusStmt->fetchAll();
 
     $upcomingStmt = $pdo->prepare(
         'SELECT o.id, o.title, c.full_name AS customer_name, o.due_date, o.status
          FROM orders o
          INNER JOIN customers c ON c.id = o.customer_id
-         WHERE o.owner_user_id = :owner_user_id
-           AND o.due_date IS NOT NULL
+         WHERE o.due_date IS NOT NULL
            AND o.status NOT IN (\'delivered\', \'cancelled\')
          ORDER BY o.due_date ASC
          LIMIT :limit_rows'
     );
-    $upcomingStmt->bindValue(':owner_user_id', $ownerId);
     $upcomingStmt->bindValue(':limit_rows', $upcomingLimit, \PDO::PARAM_INT);
     $upcomingStmt->execute();
     $upcoming = $upcomingStmt->fetchAll();
 
     Response::json([
         'summary' => [
-            'plan_code' => $planCode,
+            'users' => $userCount,
             'customers' => $customerCount,
             'measurements' => $measurementCount,
+            'orders' => $orderCount,
         ],
         'order_statuses' => $orderStatuses,
         'upcoming_orders' => $upcoming,
@@ -1907,11 +2162,20 @@ if ($method === 'GET' && routeMatches($path, '/api/diagnostics')) {
     return;
 }
 
-error_log(sprintf(
-    'Route not found. method=%s path=%s uri=%s script_name=%s',
+$logDir = dirname(__DIR__) . '/storage/logs';
+$logFile = $logDir . '/php-error.log';
+if (!is_dir($logDir)) {
+    @mkdir($logDir, 0775, true);
+}
+$logMsg = sprintf(
+    "[%s] Route not found. method=%s path=%s uri=%s script_name=%s request_filename=%s\n",
+    date('Y-m-d H:i:s'),
     $method,
     $path,
     $_SERVER['REQUEST_URI'] ?? '',
-    $_SERVER['SCRIPT_NAME'] ?? ''
-));
+    $_SERVER['SCRIPT_NAME'] ?? '',
+    $_SERVER['REQUEST_FILENAME'] ?? '(not set)'
+);
+@file_put_contents($logFile, $logMsg, FILE_APPEND | LOCK_EX);
+error_log('Route not found: ' . $path);
 Response::json(['error' => 'Not Found'], 404);

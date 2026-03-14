@@ -4,6 +4,13 @@ DirectoryIndex index.php
     RewriteEngine On
     RewriteBase /oga-tailor/
 
+    RewriteRule ^$ dashboard/index.php [R=301,L]
+    RewriteRule ^index\.html$ dashboard/index.php [R=301,L]
+    RewriteRule ^dashboard/?$ dashboard/index.php [R=301,L]
+    RewriteRule ^admin/?$ dashboard/index.php [R=301,L]
+
+    RewriteRule ^dashboard/.*\.php$ - [L]
+
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]

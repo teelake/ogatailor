@@ -152,6 +152,7 @@ Base URL: `https://your-domain.com/api`
     - `default_vat_rate` (number, 0–100 when vat_enabled)
     - `currency` (string, default NGN)
     - `payment_terms` (string, optional)
+    - `logo_data` (string, optional) – base64-encoded logo. PNG/JPEG/WEBP, max 500KB, 64–512px. Null to remove.
 
 ## Invoices
 
@@ -161,6 +162,14 @@ Base URL: `https://your-domain.com/api`
   - returns 200 if invoice already exists for order
 - `GET /api/invoices/by-order?order_id={uuid}` (protected)
   - returns full invoice data for PDF/image generation
+
+## Reminders (Daily Digest)
+
+- `POST /api/reminders/daily-digest/subscribe` (protected, Growth/Pro only)
+- `POST /api/reminders/daily-digest/unsubscribe` (protected)
+- `GET /api/reminders/daily-digest/status` (protected)
+- `GET /api/reminders/send-digests?secret={CRON_SECRET}` (cron; no auth)
+  - Sends daily email digest to subscribed users. Schedule via cron (e.g. 8:00 AM daily).
 
 ## Plan Summary
 

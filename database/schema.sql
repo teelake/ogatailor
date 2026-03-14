@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     guest_device_id VARCHAR(120) NULL UNIQUE,
     plan_code ENUM('starter', 'growth', 'pro') NOT NULL DEFAULT 'starter',
     plan_expires_at DATETIME NULL,
+    email_digest_enabled TINYINT(1) NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
@@ -158,6 +159,7 @@ CREATE TABLE IF NOT EXISTS business_profiles (
     default_vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00,
     currency VARCHAR(10) NOT NULL DEFAULT 'NGN',
     payment_terms VARCHAR(80) NULL,
+    logo_data MEDIUMTEXT NULL,
     invoice_setup_completed_at DATETIME NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
@@ -214,3 +216,33 @@ CREATE TABLE IF NOT EXISTS business_records (
     KEY idx_business_records_occurred_at (occurred_at),
     KEY idx_business_records_modified (last_modified_at)
 );
+
+CREATE TABLE IF NOT EXISTS admin_users (
+    id CHAR(36) PRIMARY KEY,
+    email VARCHAR(160) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(120) NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    admin_user_id CHAR(36) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL,
+    CONSTRAINT fk_admin_sessions_admin FOREIGN KEY (admin_user_id) REFERENCES admin_users(id) ON DELETE CASCADE,
+    UNIQUE KEY uniq_admin_sessions_hash (token_hash),
+    KEY idx_admin_sessions_admin (admin_user_id)
+);
+
+INSERT INTO admin_users (id, email, password_hash, full_name, created_at, updated_at)
+VALUES (
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    'admin@ogatailor.app',
+    '$2y$10$ejzP7pSwovgd/mHjw.u0muweaYbJ4azFaUa.zn/c2V.2x8lOzvcwO',
+    'Platform Admin',
+    NOW(),
+    NOW()
+) ON DUPLICATE KEY UPDATE updated_at = NOW();
