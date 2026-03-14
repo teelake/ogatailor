@@ -212,12 +212,14 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
         final customer = _items[index];
         return CustomerTile(
           customer: customer,
-          onTap: () {
-            Navigator.of(context).push(
+          onTap: () async {
+            await Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => CustomerDetailsScreen(customer: customer),
               ),
             );
+            if (!mounted) return;
+            await _reload();
           },
         );
       },

@@ -51,7 +51,11 @@ class CustomersRepository {
       );
       final data = Map<String, dynamic>.from(response.data as Map);
       final rows = List<Map<String, dynamic>>.from(data['data'] as List<dynamic>);
-      if (offset == 0 && (query == null || query.trim().isEmpty)) {
+      // Only save to cache when we have the full or active list - never when archived=only,
+      // otherwise we'd overwrite cache with only archived and lose active customers for offline.
+      if (offset == 0 &&
+          (query == null || query.trim().isEmpty) &&
+          archivedMode != 'only') {
         await _offlineSync.saveCache('cache_customers', rows);
       }
       final meta = Map<String, dynamic>.from((data['meta'] ?? const <String, dynamic>{}) as Map);
