@@ -506,6 +506,62 @@ table.data-table {
 
 .report-card h3 { font-size: 15px; margin-bottom: 16px; color: var(--text-muted); }
 
+/* Reports page */
+.reports-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.reports-filters { margin-bottom: 24px; }
+.reports-filter-form .filter-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+.reports-filter-form .filter-group { min-width: 140px; }
+.reports-filter-form .filter-search { flex: 1; min-width: 180px; }
+.reports-filter-form .filter-submit { flex-shrink: 0; }
+
+.analytics-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.analytics-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  transition: border-color 0.2s;
+}
+.analytics-card:hover { border-color: var(--border-strong); }
+.analytics-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.analytics-icon svg { width: 24px; height: 24px; }
+.analytics-icon-users { background: rgba(59, 130, 246, 0.15); color: var(--info); }
+.analytics-icon-customers { background: rgba(16, 185, 129, 0.15); color: var(--accent); }
+.analytics-icon-orders { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.analytics-icon-revenue { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+.analytics-content { min-width: 0; }
+.analytics-value { font-size: 26px; font-weight: 700; display: block; line-height: 1.2; }
+.analytics-label { font-size: 13px; color: var(--text-muted); }
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px 0 0;
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.pagination-info { font-size: 13px; color: var(--text-muted); }
+.pagination-links { display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .app { flex-direction: column; }

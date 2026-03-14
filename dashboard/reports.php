@@ -5,72 +5,309 @@ declare(strict_types=1);
 require_once __DIR__ . '/config.php';
 requireAdmin();
 
+$view = $_GET['view'] ?? 'overview';
+$validViews = ['overview', 'tailors', 'customers', 'orders'];
+$view = in_array($view, $validViews, true) ? $view : 'overview';
+
 $period = $_GET['period'] ?? '30';
-$days = in_array($period, ['7', '30', '90'], true) ? (int)$period : 30;
-$since = date('Y-m-d', strtotime("-{$days} days"));
+$period = in_array($period, ['7', '30', '90', 'all'], true) ? $period : '30';
+$days = $period === 'all' ? null : (int)$period;
+$since = $days ? date('Y-m-d', strtotime("-{$days} days")) : null;
 
-$userStats = $pdo->prepare(
-    'SELECT plan_code, COUNT(*) AS total FROM users WHERE is_guest = 0 AND created_at >= :since GROUP BY plan_code'
-);
-$userStats->execute([':since' => $since]);
-$usersByPlan = $userStats->fetchAll();
+$planFilter = $_GET['plan'] ?? 'all';
+$planFilter = in_array($planFilter, ['all', 'starter', 'growth', 'pro'], true) ? $planFilter : 'all';
 
-$stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE is_guest = 0 AND created_at >= :since');
-$stmt->execute([':since' => $since]);
-$newUsers = (int)$stmt->fetchColumn();
+$search = trim((string)($_GET['q'] ?? ''));
+$tailorId = trim((string)($_GET['tailor_id'] ?? ''));
+$customerId = trim((string)($_GET['customer_id'] ?? ''));
 
-$stmt = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE created_at >= :since');
-$stmt->execute([':since' => $since]);
-$newCustomers = (int)$stmt->fetchColumn();
+$page = max(1, (int)($_GET['page'] ?? 1));
+$perPage = max(10, min(100, (int)($_GET['per'] ?? 20)));
+$offset = ($page - 1) * $perPage;
 
-$stmt = $pdo->prepare('SELECT COUNT(*) FROM orders WHERE created_at >= :since');
-$stmt->execute([':since' => $since]);
-$newOrders = (int)$stmt->fetchColumn();
+$export = isset($_GET['export']) && $_GET['export'] === 'csv';
 
-$orderStatuses = $pdo->query(
-    'SELECT status, COUNT(*) AS total FROM orders GROUP BY status'
-)->fetchAll();
+$baseParams = ['view' => $view, 'period' => $period, 'plan' => $planFilter, 'q' => $search];
+if ($tailorId) $baseParams['tailor_id'] = $tailorId;
+if ($customerId) $baseParams['customer_id'] = $customerId;
 
-$stmt = $pdo->prepare(
-    'SELECT u.id, u.full_name, u.email, u.plan_code, u.created_at
-     FROM users u WHERE u.is_guest = 0 ORDER BY u.created_at DESC LIMIT 10'
-);
-$stmt->execute();
-$recentUsers = $stmt->fetchAll();
+$planWhere = $planFilter !== 'all' ? ' AND u.plan_code = :plan' : '';
+$planParam = $planFilter !== 'all' ? [':plan' => $planFilter] : [];
+$sinceWhere = $since ? ' AND u.created_at >= :since' : '';
+$sinceParam = $since ? [':since' => $since] : [];
+$searchWhere = $search !== '' ? ' AND (u.full_name LIKE :q1 OR u.email LIKE :q1 OR u.business_name LIKE :q1)' : '';
+$searchParam = $search !== '' ? [':q1' => '%' . $search . '%'] : [];
+
+$params = array_merge($planParam, $sinceParam, $searchParam);
+
+// Overview stats (platform-wide)
+$stmt = $pdo->prepare('SELECT COUNT(*) FROM users u WHERE u.is_guest = 0' . $planWhere . $sinceWhere . $searchWhere);
+$stmt->execute($params);
+$totalTailors = (int)$stmt->fetchColumn();
+
+$custWhere = $since ? ' WHERE c.created_at >= :since' : '';
+$stmt = $pdo->prepare('SELECT COUNT(*) FROM customers c' . $custWhere);
+$stmt->execute($since ? [':since' => $since] : []);
+$totalCustomers = (int)$stmt->fetchColumn();
+
+$ordWhere = $since ? ' WHERE o.created_at >= :since' : '';
+$stmt = $pdo->prepare('SELECT COUNT(*) FROM orders o' . $ordWhere);
+$stmt->execute($since ? [':since' => $since] : []);
+$totalOrders = (int)$stmt->fetchColumn();
+
+$stmt = $pdo->prepare($since ? 'SELECT COALESCE(SUM(amount), 0) FROM payments WHERE paid_at >= :since' : 'SELECT COALESCE(SUM(amount), 0) FROM payments');
+$stmt->execute($since ? [':since' => $since] : []);
+$totalRevenue = (float)$stmt->fetchColumn();
+
+$usersByPlan = $pdo->query('SELECT plan_code, COUNT(*) AS total FROM users WHERE is_guest = 0 GROUP BY plan_code')->fetchAll();
+$orderStatuses = $pdo->query('SELECT status, COUNT(*) AS total FROM orders GROUP BY status')->fetchAll();
+
+// Tailors list (paginated)
+$tailors = [];
+$tailorsTotal = 0;
+if ($view === 'tailors') {
+    $sql = 'SELECT u.id, u.full_name, u.email, u.business_name, u.plan_code, u.created_at,
+            (SELECT COUNT(*) FROM customers c WHERE c.owner_user_id = u.id) AS cust_count,
+            (SELECT COUNT(*) FROM orders o WHERE o.owner_user_id = u.id) AS order_count
+            FROM users u WHERE u.is_guest = 0' . $planWhere . $searchWhere . ' ORDER BY u.created_at DESC';
+    $countSql = 'SELECT COUNT(*) FROM users u WHERE u.is_guest = 0' . $planWhere . $searchWhere;
+    $stmt = $pdo->prepare($countSql);
+    $stmt->execute($params);
+    $tailorsTotal = (int)$stmt->fetchColumn();
+    $limit = $export ? '' : ' LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset;
+    $stmt = $pdo->prepare($sql . $limit);
+    $stmt->execute($params);
+    $tailors = $stmt->fetchAll();
+    if ($export) {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="tailors-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Name', 'Email', 'Business', 'Plan', 'Customers', 'Orders', 'Joined']);
+        foreach ($tailors as $t) {
+            fputcsv($out, [$t['full_name'], $t['email'] ?? '', $t['business_name'] ?? '', $t['plan_code'], $t['cust_count'], $t['order_count'], $t['created_at']]);
+        }
+        fclose($out);
+        exit;
+    }
+}
+
+// Customers list (filter by tailor)
+$customers = [];
+$customersTotal = 0;
+if ($view === 'customers') {
+    $custWhere = $tailorId ? 'c.owner_user_id = :tid' : '1=1';
+    $custParams = $tailorId ? [':tid' => $tailorId] : [];
+    if ($search) {
+        $custWhere .= ' AND (c.full_name LIKE :q1 OR c.phone_number LIKE :q1)';
+        $custParams[':q1'] = '%' . $search . '%';
+    }
+    $custSql = "SELECT c.id, c.owner_user_id, c.full_name, c.phone_number, c.created_at, u.full_name AS tailor_name,
+                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
+                FROM customers c INNER JOIN users u ON u.id = c.owner_user_id WHERE u.is_guest = 0 AND {$custWhere}";
+    $countSql = "SELECT COUNT(*) FROM customers c INNER JOIN users u ON u.id = c.owner_user_id WHERE u.is_guest = 0 AND {$custWhere}";
+    $stmt = $pdo->prepare($countSql);
+    $stmt->execute($custParams);
+    $customersTotal = (int)$stmt->fetchColumn();
+    $stmt = $pdo->prepare($custSql . ' ORDER BY c.created_at DESC LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset);
+    $stmt->execute($custParams);
+    $customers = $stmt->fetchAll();
+    if ($export && $customersTotal > 0) {
+        $stmt = $pdo->prepare($custSql . ' ORDER BY c.created_at DESC');
+        $stmt->execute($custParams);
+        $exportRows = $stmt->fetchAll();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="customers-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Customer', 'Phone', 'Tailor', 'Orders', 'Added']);
+        foreach ($exportRows as $c) {
+            fputcsv($out, [$c['full_name'], $c['phone_number'] ?? '', $c['tailor_name'] ?? '', $c['order_count'], $c['created_at']]);
+        }
+        fclose($out);
+        exit;
+    }
+}
+
+// Orders list
+$orders = [];
+$ordersTotal = 0;
+if ($view === 'orders') {
+    $ordWhere = '1=1';
+    $ordParams = [];
+    if ($tailorId) {
+        $ordWhere .= ' AND o.owner_user_id = :tid';
+        $ordParams[':tid'] = $tailorId;
+    }
+    if ($customerId) {
+        $ordWhere .= ' AND o.customer_id = :cid';
+        $ordParams[':cid'] = $customerId;
+    }
+    if ($search) {
+        $ordWhere .= ' AND (o.title LIKE :q1 OR c.full_name LIKE :q1)';
+        $ordParams[':q1'] = '%' . $search . '%';
+    }
+    $ordSql = "SELECT o.id, o.title, o.status, o.amount_total, o.due_date, o.created_at,
+               u.full_name AS tailor_name, c.full_name AS customer_name
+               FROM orders o INNER JOIN users u ON u.id = o.owner_user_id
+               INNER JOIN customers c ON c.id = o.customer_id WHERE {$ordWhere}";
+    $countSql = "SELECT COUNT(*) FROM orders o INNER JOIN customers c ON c.id = o.customer_id WHERE {$ordWhere}";
+    $stmt = $pdo->prepare($countSql);
+    $stmt->execute($ordParams);
+    $ordersTotal = (int)$stmt->fetchColumn();
+    $stmt = $pdo->prepare($ordSql . ' ORDER BY o.created_at DESC LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset);
+    $stmt->execute($ordParams);
+    $orders = $stmt->fetchAll();
+    if ($export && $ordersTotal > 0) {
+        $stmt = $pdo->prepare($ordSql . ' ORDER BY o.created_at DESC');
+        $stmt->execute($ordParams);
+        $exportRows = $stmt->fetchAll();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="orders-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Order', 'Tailor', 'Customer', 'Amount', 'Status', 'Due', 'Created']);
+        foreach ($exportRows as $o) {
+            fputcsv($out, [$o['title'], $o['tailor_name'], $o['customer_name'], $o['amount_total'], $o['status'], $o['due_date'] ?? '', $o['created_at']]);
+        }
+        fclose($out);
+        exit;
+    }
+}
+
+// Pagination
+$totalRows = match ($view) {
+    'tailors' => $tailorsTotal,
+    'customers' => $customersTotal,
+    'orders' => $ordersTotal,
+    default => 0,
+};
+$totalPages = $totalRows > 0 ? (int)ceil($totalRows / $perPage) : 1;
+
+// Tailor dropdown for customers/orders filter
+$tailorsForFilter = $pdo->query('SELECT id, full_name FROM users WHERE is_guest = 0 ORDER BY full_name')->fetchAll();
 
 $pageTitle = 'Reports';
 require __DIR__ . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1>Reports</h1>
-    <form method="get" class="inline-form">
-        <select name="period" onchange="this.form.submit()">
-            <option value="7" <?= $period === '7' ? 'selected' : '' ?>>Last 7 days</option>
-            <option value="30" <?= $period === '30' ? 'selected' : '' ?>>Last 30 days</option>
-            <option value="90" <?= $period === '90' ? 'selected' : '' ?>>Last 90 days</option>
-        </select>
+<div class="page-header reports-header">
+    <h1>Platform Reports</h1>
+    <div class="reports-actions">
+        <?php if ($view !== 'overview'): ?>
+        <a href="?<?= http_build_query(array_merge($baseParams, ['export' => 'csv'])) ?>" class="btn btn-secondary btn-sm">
+            Export CSV
+        </a>
+        <?php endif; ?>
+    </div>
+</div>
+
+<div class="reports-filters card">
+    <form method="get" class="reports-filter-form">
+        <?php if ($tailorId): ?><input type="hidden" name="tailor_id" value="<?= escapeHtml($tailorId) ?>"><?php endif; ?>
+        <?php if ($customerId): ?><input type="hidden" name="customer_id" value="<?= escapeHtml($customerId) ?>"><?php endif; ?>
+        <div class="filter-row">
+            <div class="filter-group">
+                <label>View</label>
+                <select name="view" onchange="this.form.submit()" class="form-control">
+                    <option value="overview" <?= $view === 'overview' ? 'selected' : '' ?>>Overview</option>
+                    <option value="tailors" <?= $view === 'tailors' ? 'selected' : '' ?>>Tailors</option>
+                    <option value="customers" <?= $view === 'customers' ? 'selected' : '' ?>>Customers</option>
+                    <option value="orders" <?= $view === 'orders' ? 'selected' : '' ?>>Orders</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Period</label>
+                <select name="period" onchange="this.form.submit()" class="form-control">
+                    <option value="7" <?= $period === '7' ? 'selected' : '' ?>>Last 7 days</option>
+                    <option value="30" <?= $period === '30' ? 'selected' : '' ?>>Last 30 days</option>
+                    <option value="90" <?= $period === '90' ? 'selected' : '' ?>>Last 90 days</option>
+                    <option value="all" <?= $period === 'all' ? 'selected' : '' ?>>All time</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Plan</label>
+                <select name="plan" onchange="this.form.submit()" class="form-control">
+                    <option value="all" <?= $planFilter === 'all' ? 'selected' : '' ?>>All plans</option>
+                    <option value="starter" <?= $planFilter === 'starter' ? 'selected' : '' ?>>Starter</option>
+                    <option value="growth" <?= $planFilter === 'growth' ? 'selected' : '' ?>>Growth</option>
+                    <option value="pro" <?= $planFilter === 'pro' ? 'selected' : '' ?>>Pro</option>
+                </select>
+            </div>
+            <?php if (in_array($view, ['customers', 'orders'])): ?>
+            <div class="filter-group">
+                <label>Tailor</label>
+                <select name="tailor_id" onchange="this.form.submit()" class="form-control">
+                    <option value="">All tailors</option>
+                    <?php foreach ($tailorsForFilter as $tf): ?>
+                    <option value="<?= escapeHtml($tf['id']) ?>" <?= $tailorId === $tf['id'] ? 'selected' : '' ?>><?= escapeHtml($tf['full_name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+            <div class="filter-group filter-search">
+                <label>Search</label>
+                <input type="text" name="q" class="form-control" value="<?= escapeHtml($search) ?>" placeholder="Search...">
+            </div>
+            <?php if (in_array($view, ['tailors', 'customers', 'orders'])): ?>
+            <div class="filter-group">
+                <label>Per page</label>
+                <select name="per" onchange="this.form.submit()" class="form-control">
+                    <option value="10" <?= $perPage === 10 ? 'selected' : '' ?>>10</option>
+                    <option value="20" <?= $perPage === 20 ? 'selected' : '' ?>>20</option>
+                    <option value="50" <?= $perPage === 50 ? 'selected' : '' ?>>50</option>
+                    <option value="100" <?= $perPage === 100 ? 'selected' : '' ?>>100</option>
+                </select>
+            </div>
+            <?php endif; ?>
+            <div class="filter-group filter-submit">
+                <label>&nbsp;</label>
+                <button type="submit" class="btn btn-primary">Apply</button>
+            </div>
+        </div>
     </form>
 </div>
 
-<div class="stats-grid">
-    <div class="stat-card">
-        <span class="stat-label">New users (<?= $days ?>d)</span>
-        <span class="stat-value"><?= $newUsers ?></span>
+<?php if ($view === 'overview'): ?>
+<div class="analytics-cards">
+    <div class="analytics-card">
+        <div class="analytics-icon analytics-icon-users">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div class="analytics-content">
+            <span class="analytics-value"><?= number_format($totalTailors) ?></span>
+            <span class="analytics-label">Tailors</span>
+        </div>
     </div>
-    <div class="stat-card">
-        <span class="stat-label">New customers (<?= $days ?>d)</span>
-        <span class="stat-value"><?= $newCustomers ?></span>
+    <div class="analytics-card">
+        <div class="analytics-icon analytics-icon-customers">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div class="analytics-content">
+            <span class="analytics-value"><?= number_format($totalCustomers) ?></span>
+            <span class="analytics-label">Customers</span>
+        </div>
     </div>
-    <div class="stat-card">
-        <span class="stat-label">New orders (<?= $days ?>d)</span>
-        <span class="stat-value"><?= $newOrders ?></span>
+    <div class="analytics-card">
+        <div class="analytics-icon analytics-icon-orders">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <div class="analytics-content">
+            <span class="analytics-value"><?= number_format($totalOrders) ?></span>
+            <span class="analytics-label">Orders</span>
+        </div>
+    </div>
+    <div class="analytics-card">
+        <div class="analytics-icon analytics-icon-revenue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div class="analytics-content">
+            <span class="analytics-value">₦<?= number_format($totalRevenue, 0) ?></span>
+            <span class="analytics-label">Revenue</span>
+        </div>
     </div>
 </div>
 
 <div class="grid-2">
     <div class="card">
-        <div class="card-title">Users by plan</div>
+        <div class="card-title">Tailors by plan</div>
         <?php
         $maxPlan = !empty($usersByPlan) ? max(array_column($usersByPlan, 'total')) : 1;
         foreach ($usersByPlan as $row):
@@ -86,9 +323,8 @@ require __DIR__ . '/includes/header.php';
         <p class="muted">No data</p>
         <?php endif; ?>
     </div>
-
     <div class="card">
-        <div class="card-title">Order status breakdown</div>
+        <div class="card-title">Order status</div>
         <?php
         $maxStatus = !empty($orderStatuses) ? max(array_column($orderStatuses, 'total')) : 1;
         foreach ($orderStatuses as $row):
@@ -103,30 +339,128 @@ require __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php elseif ($view === 'tailors'): ?>
 <div class="card">
-    <div class="card-title">Recent users</div>
+    <div class="card-title">Tailors (<?= number_format($tailorsTotal) ?>)</div>
     <div class="table-wrap">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Email</th>
+                    <th>Tailor</th>
                     <th>Plan</th>
+                    <th>Customers</th>
+                    <th>Orders</th>
                     <th>Joined</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($recentUsers as $u): ?>
+                <?php foreach ($tailors as $t): ?>
                 <tr>
-                    <td><?= escapeHtml($u['full_name']) ?></td>
-                    <td><?= escapeHtml($u['email'] ?? '-') ?></td>
-                    <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($u['plan_code'])) ?></span></td>
-                    <td><?= date('M j, Y', strtotime($u['created_at'])) ?></td>
+                    <td>
+                        <strong><?= escapeHtml($t['full_name']) ?></strong>
+                        <?php if (!empty($t['email'])): ?><br><span class="muted" style="font-size:12px;"><?= escapeHtml($t['email']) ?></span><?php endif; ?>
+                    </td>
+                    <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($t['plan_code'])) ?></span></td>
+                    <td><?= (int)$t['cust_count'] ?></td>
+                    <td><?= (int)$t['order_count'] ?></td>
+                    <td><?= date('M j, Y', strtotime($t['created_at'])) ?></td>
+                    <td>
+                        <a href="?view=customers&tailor_id=<?= urlencode($t['id']) ?>&plan=<?= escapeHtml($planFilter) ?>" class="btn btn-sm btn-secondary">Customers</a>
+                        <a href="?view=orders&tailor_id=<?= urlencode($t['id']) ?>&plan=<?= escapeHtml($planFilter) ?>" class="btn btn-sm btn-secondary">Orders</a>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
     </div>
+    <?php if (empty($tailors)): ?>
+    <p class="muted" style="padding: 24px;">No tailors match the filters.</p>
+    <?php else: ?>
+    <?php require __DIR__ . '/includes/pagination.php'; ?>
+    <?php endif; ?>
 </div>
+
+<?php elseif ($view === 'customers'): ?>
+<div class="card">
+    <div class="card-title">Customers <?= $tailorId ? 'under selected tailor' : '' ?> (<?= number_format($customersTotal) ?>)</div>
+    <?php if (!$tailorId): ?>
+    <p class="muted" style="padding: 16px;">Select a tailor above to view their customers, or leave as "All tailors" for platform-wide list.</p>
+    <?php endif; ?>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Customer</th>
+                    <th>Phone</th>
+                    <?php if (!$tailorId): ?><th>Tailor</th><?php endif; ?>
+                    <th>Orders</th>
+                    <th>Added</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($customers as $c): ?>
+                <tr>
+                    <td><strong><?= escapeHtml($c['full_name']) ?></strong></td>
+                    <td><?= escapeHtml($c['phone_number'] ?? '-') ?></td>
+                    <?php if (!$tailorId): ?><td><?= escapeHtml($c['tailor_name'] ?? '-') ?></td><?php endif; ?>
+                    <td><?= (int)$c['order_count'] ?></td>
+                    <td><?= date('M j, Y', strtotime($c['created_at'])) ?></td>
+                    <td>
+                        <a href="?view=orders&tailor_id=<?= urlencode($c['owner_user_id']) ?>&customer_id=<?= urlencode($c['id']) ?>&plan=<?= escapeHtml($planFilter) ?>" class="btn btn-sm btn-secondary">Orders</a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php if (empty($customers) && $tailorId): ?>
+    <p class="muted" style="padding: 24px;">No customers for this tailor.</p>
+    <?php elseif (empty($customers)): ?>
+    <p class="muted" style="padding: 24px;">No customers match the filters.</p>
+    <?php else: ?>
+    <?php require __DIR__ . '/includes/pagination.php'; ?>
+    <?php endif; ?>
+</div>
+
+<?php elseif ($view === 'orders'): ?>
+<div class="card">
+    <div class="card-title">Orders <?= $customerId ? 'from selected customer' : '' ?> (<?= number_format($ordersTotal) ?>)</div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Tailor</th>
+                    <th>Customer</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Due</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($orders as $o): ?>
+                <tr>
+                    <td><strong><?= escapeHtml($o['title']) ?></strong></td>
+                    <td><?= escapeHtml($o['tailor_name'] ?? '-') ?></td>
+                    <td><?= escapeHtml($o['customer_name'] ?? '-') ?></td>
+                    <td>₦<?= number_format((float)$o['amount_total'], 0) ?></td>
+                    <td><span class="pill pill-<?= $o['status'] === 'delivered' ? 'success' : ($o['status'] === 'cancelled' ? 'warning' : 'muted') ?>"><?= escapeHtml(ucfirst(str_replace('_', ' ', $o['status']))) ?></span></td>
+                    <td><?= $o['due_date'] ? date('M j, Y', strtotime($o['due_date'])) : '-' ?></td>
+                    <td><?= date('M j, Y', strtotime($o['created_at'])) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php if (empty($orders)): ?>
+    <p class="muted" style="padding: 24px;">No orders match the filters.</p>
+    <?php else: ?>
+    <?php require __DIR__ . '/includes/pagination.php'; ?>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>
