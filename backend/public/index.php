@@ -485,10 +485,16 @@ if (routeMatches($path, '/api/') && !$isPublicRoute) {
 
 // Invoice generate - explicit early match (avoids "Route not found" on some server configs)
 if ($method === 'POST' && $path === '/api/invoices/generate') {
+    $logDir = dirname(__DIR__) . '/storage/logs';
+    $invoiceLog = $logDir . '/invoice-debug.log';
+    $log = static function (string $msg) use ($invoiceLog): void {
+        @file_put_contents($invoiceLog, date('Y-m-d H:i:s') . ' ' . $msg . "\n", FILE_APPEND | LOCK_EX);
+    };
     try {
     $ownerId = (string)($authUser['id'] ?? '');
     $data = requestBody();
     $orderId = trim((string)($data['order_id'] ?? ''));
+    $log("invoice_generate start owner=$ownerId order_id=$orderId");
 
     if ($orderId === '') {
         Response::json(['error' => 'order_id is required'], 422);
@@ -504,6 +510,7 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
     $bpStmt->execute([':owner_user_id' => $ownerId]);
     $bp = $bpStmt->fetch();
     if (!$bp) {
+        $log("invoice_generate fail: no business profile");
         Response::json(['error' => 'Complete invoice setup in Settings before generating invoices'], 403);
         return;
     }
@@ -518,6 +525,7 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
     $orderStmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
     $order = $orderStmt->fetch();
     if (!$order) {
+        $log("invoice_generate fail: order not found order_id=$orderId");
         Response::json(['error' => 'Order not found'], 404);
         return;
     }
@@ -610,6 +618,7 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
         return;
     }
 
+    $log("invoice_generate success invoice_id=$invoiceId invoice_number=$invoiceNumber");
     Response::json([
         'message' => 'Invoice generated',
         'invoice_id' => $invoiceId,
@@ -619,6 +628,7 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
         'currency' => (string)$bp['currency'],
     ], 201);
     } catch (\Throwable $e) {
+        $log("invoice_generate exception: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
         error_log('Invoice generate error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
         Response::json(['error' => 'Failed to generate invoice. Please try again.'], 500);
     }
@@ -627,8 +637,14 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
 
 // Invoice by-order - explicit early match (same as generate, avoids route issues)
 if ($method === 'GET' && $path === '/api/invoices/by-order') {
+    $logDir = dirname(__DIR__) . '/storage/logs';
+    $invoiceLog = $logDir . '/invoice-debug.log';
+    $logByOrder = static function (string $msg) use ($invoiceLog): void {
+        @file_put_contents($invoiceLog, date('Y-m-d H:i:s') . ' ' . $msg . "\n", FILE_APPEND | LOCK_EX);
+    };
     $ownerId = (string)($authUser['id'] ?? '');
     $orderId = trim((string)($_GET['order_id'] ?? ''));
+    $logByOrder("invoice_by_order start owner=$ownerId order_id=$orderId");
     if ($orderId === '') {
         Response::json(['error' => 'order_id is required'], 422);
         return;
@@ -650,6 +666,7 @@ if ($method === 'GET' && $path === '/api/invoices/by-order') {
     $stmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
     $invoice = $stmt->fetch();
     if (!$invoice) {
+        $logByOrder("invoice_by_order fail: not found order_id=$orderId");
         Response::json(['error' => 'Invoice not found for this order'], 404);
         return;
     }
@@ -675,6 +692,7 @@ if ($method === 'GET' && $path === '/api/invoices/by-order') {
             'website_url' => trim($wmSettings['watermark_website_url'] ?? 'https://ogatailor.app') ?: 'https://ogatailor.app',
         ];
     }
+    $logByOrder("invoice_by_order success invoice_id=" . ($invoice['id'] ?? '') . " items=" . count($invoice['items'] ?? []));
     Response::json(['data' => $invoice]);
     return;
 }

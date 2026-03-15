@@ -1066,6 +1066,12 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
       return;
     }
     if (!context.mounted) return;
+    if (invoice.isEmpty || (invoice['invoice_number'] == null && invoice['total_amount'] == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invoice data was empty. Please try again.')),
+      );
+      return;
+    }
     final config = ref.read(appConfigProvider).valueOrNull;
     final currencySymbols = config?.currencies != null
         ? {for (var c in config!.currencies) c.code.toUpperCase(): c.symbol}
@@ -1111,20 +1117,24 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
             const SizedBox(height: 16),
             RepaintBoundary(
               key: _previewKey,
-              child: hasItems
-                  ? InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48, currencySymbols: widget.currencySymbols)
-                  : Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 120),
+                child: hasItems
+                    ? InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48, currencySymbols: widget.currencySymbols)
+                    : Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Text(
+                          'Invoice #${invoice['invoice_number'] ?? '—'}\nTotal: ${invoice['currency'] ?? 'NGN'} ${formatAmount((invoice['total_amount'] ?? 0) as num)}',
+                          style: const TextStyle(fontSize: 14),
+                        ),
                       ),
-                      child: Text(
-                        'Invoice #${invoice['invoice_number'] ?? ''}\nTotal: ${invoice['currency'] ?? 'NGN'} ${formatAmount((invoice['total_amount'] ?? 0) as num)}',
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
+              ),
             ),
             const SizedBox(height: 24),
             Row(

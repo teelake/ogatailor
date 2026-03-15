@@ -91,7 +91,7 @@ $activityByDay = $activityStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
 // Top tailors by customers
 $topTailors = $pdo->query(
-    'SELECT u.full_name, u.email, u.plan_code,
+    'SELECT u.id, u.full_name, u.email, u.plan_code,
             (SELECT COUNT(*) FROM customers c WHERE c.owner_user_id = u.id) AS cust_count,
             (SELECT COUNT(*) FROM orders o WHERE o.owner_user_id = u.id) AS order_count
      FROM users u WHERE u.is_guest = 0
@@ -326,7 +326,7 @@ require __DIR__ . '/includes/header.php';
                     <td>
                         <strong><?= escapeHtml($t['full_name']) ?></strong>
                         <?php if (!empty($t['email'])): ?><br><span class="muted" style="font-size:12px;"><?= escapeHtml($t['email']) ?></span><?php endif; ?>
-                        <br><a href="<?= $base ?>/reports?view=customers&tailor_id=<?= urlencode($t['id']) ?>" class="muted" style="font-size:12px;">View in Reports →</a>
+                        <br><a href="<?= $base ?>/reports?view=customers&tailor_id=<?= urlencode((string)($t['id'] ?? '')) ?>" class="muted" style="font-size:12px;">View in Reports →</a>
                     </td>
                     <td><span class="pill pill-muted"><?= escapeHtml(ucfirst($t['plan_code'])) ?></span></td>
                     <td><?= (int)$t['cust_count'] ?></td>
