@@ -1072,6 +1072,8 @@ class _OrderDetailsScreenState extends ConsumerState<_OrderDetailsScreen> {
         : null;
     await showModalBottomSheet<void>(
       context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      isScrollControlled: true,
       builder: (ctx) => _InvoiceShareSheet(invoice: invoice, dio: ref.read(dioProvider), currencySymbols: currencySymbols),
     );
   }
@@ -1095,11 +1097,13 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final hasItems = (invoice['items'] as List?)?.isNotEmpty ?? false;
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('Share Invoice', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
@@ -1107,7 +1111,20 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
             const SizedBox(height: 16),
             RepaintBoundary(
               key: _previewKey,
-              child: InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48, currencySymbols: widget.currencySymbols),
+              child: hasItems
+                  ? InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48, currencySymbols: widget.currencySymbols)
+                  : Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        'Invoice #${invoice['invoice_number'] ?? ''}\nTotal: ${invoice['currency'] ?? 'NGN'} ${formatAmount((invoice['total_amount'] ?? 0) as num)}',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
             ),
             const SizedBox(height: 24),
             Row(

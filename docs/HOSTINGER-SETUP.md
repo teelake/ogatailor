@@ -89,3 +89,21 @@ APP_BASE_PATH=oga-tailor
 ```
 
 This helps the backend strip the subpath correctly from request URIs.
+
+### 8. Plan upgrade (Paystack) – "Could not start payment"
+
+For plan upgrades to work, you need:
+
+1. **Paystack secret key** – Dashboard → Configuration → API settings → enter your Paystack **Secret Key** (starts with `sk_live_` or `sk_test_`).
+
+2. **APP_URL** in `backend/.env` – Must match your site URL:
+   ```
+   APP_URL=https://webspace.ng/oga-tailor
+   ```
+   (No trailing slash.) Paystack uses this for the callback URL.
+
+3. **User email** – The user must have an email in their profile (Profile → Edit → Email). Paystack requires it for payment.
+
+4. **Plan prices** – Dashboard → Configuration → Plan prices. Set Growth and Pro prices.
+
+If you see "Payment is not configured yet" – the Paystack secret key is missing in the dashboard.

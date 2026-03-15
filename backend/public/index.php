@@ -625,6 +625,60 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
     return;
 }
 
+// Invoice by-order - explicit early match (same as generate, avoids route issues)
+if ($method === 'GET' && $path === '/api/invoices/by-order') {
+    $ownerId = (string)($authUser['id'] ?? '');
+    $orderId = trim((string)($_GET['order_id'] ?? ''));
+    if ($orderId === '') {
+        Response::json(['error' => 'order_id is required'], 422);
+        return;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT i.id, i.order_id, i.invoice_number, i.subtotal_amount, i.discount_amount, i.total_amount,
+                i.issued_at, i.due_at, i.status,
+                bp.business_name, bp.business_phone, bp.business_email, bp.business_address,
+                bp.currency, bp.vat_enabled, bp.default_vat_rate, bp.payment_terms, bp.logo_data,
+                o.title AS order_title, o.amount_total AS order_amount, o.notes AS order_notes,
+                c.full_name AS customer_name, c.phone_number AS customer_phone'
+        . ' FROM invoices i'
+        . ' INNER JOIN business_profiles bp ON bp.owner_user_id = i.owner_user_id'
+        . ' INNER JOIN orders o ON o.id = i.order_id'
+        . ' INNER JOIN customers c ON c.id = o.customer_id'
+        . ' WHERE i.order_id = :order_id AND i.owner_user_id = :owner_user_id'
+        . ' LIMIT 1'
+    );
+    $stmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
+    $invoice = $stmt->fetch();
+    if (!$invoice) {
+        Response::json(['error' => 'Invoice not found for this order'], 404);
+        return;
+    }
+    $itemsStmt = $pdo->prepare(
+        'SELECT id, description, quantity, unit_price, amount FROM invoice_items WHERE invoice_id = :invoice_id ORDER BY created_at'
+    );
+    $itemsStmt->execute([':invoice_id' => $invoice['id']]);
+    $invoice['items'] = $itemsStmt->fetchAll();
+    $planCode = (string)($authUser['plan_code'] ?? 'starter');
+    $wmStmt = $pdo->query(
+        "SELECT setting_key, setting_value FROM platform_settings
+         WHERE setting_key IN ('watermark_type', 'watermark_logo_url', 'watermark_website_url', 'watermark_plans')"
+    );
+    $wmSettings = [];
+    while ($row = $wmStmt->fetch()) {
+        $wmSettings[$row['setting_key']] = $row['setting_value'] ?? '';
+    }
+    $watermarkPlans = array_filter(explode(',', $wmSettings['watermark_plans'] ?? ''));
+    if (in_array($planCode, $watermarkPlans, true)) {
+        $invoice['watermark'] = [
+            'type' => $wmSettings['watermark_type'] ?? 'both',
+            'logo_url' => trim($wmSettings['watermark_logo_url'] ?? '') ?: null,
+            'website_url' => trim($wmSettings['watermark_website_url'] ?? 'https://ogatailor.app') ?: 'https://ogatailor.app',
+        ];
+    }
+    Response::json(['data' => $invoice]);
+    return;
+}
+
 if ($method === 'POST' && routeMatches($path, '/api/auth/guest-start')) {
     $data = requestBody();
     $deviceId = trim((string)($data['device_id'] ?? ''));
@@ -2089,63 +2143,6 @@ if ($method === 'PATCH' && routeMatches($path, '/api/business-profile')) {
         ]);
     }
     Response::json(['message' => 'Invoice setup completed']);
-    return;
-}
-
-if ($method === 'GET' && routeMatches($path, '/api/invoices/by-order')) {
-    $ownerId = (string)($authUser['id'] ?? '');
-    $orderId = trim((string)($_GET['order_id'] ?? ''));
-    if ($orderId === '') {
-        Response::json(['error' => 'order_id is required'], 422);
-        return;
-    }
-
-    $stmt = $pdo->prepare(
-        'SELECT i.id, i.order_id, i.invoice_number, i.subtotal_amount, i.discount_amount, i.total_amount,
-                i.issued_at, i.due_at, i.status,
-                bp.business_name, bp.business_phone, bp.business_email, bp.business_address,
-                bp.currency, bp.vat_enabled, bp.default_vat_rate, bp.payment_terms, bp.logo_data,
-                o.title AS order_title, o.amount_total AS order_amount, o.notes AS order_notes,
-                c.full_name AS customer_name, c.phone_number AS customer_phone'
-        . ' FROM invoices i'
-        . ' INNER JOIN business_profiles bp ON bp.owner_user_id = i.owner_user_id'
-        . ' INNER JOIN orders o ON o.id = i.order_id'
-        . ' INNER JOIN customers c ON c.id = o.customer_id'
-        . ' WHERE i.order_id = :order_id AND i.owner_user_id = :owner_user_id'
-        . ' LIMIT 1'
-    );
-    $stmt->execute([':order_id' => $orderId, ':owner_user_id' => $ownerId]);
-    $invoice = $stmt->fetch();
-    if (!$invoice) {
-        Response::json(['error' => 'Invoice not found for this order'], 404);
-        return;
-    }
-
-    $itemsStmt = $pdo->prepare(
-        'SELECT id, description, quantity, unit_price, amount FROM invoice_items WHERE invoice_id = :invoice_id ORDER BY created_at'
-    );
-    $itemsStmt->execute([':invoice_id' => $invoice['id']]);
-    $invoice['items'] = $itemsStmt->fetchAll();
-
-    $planCode = (string)($authUser['plan_code'] ?? 'starter');
-    $wmStmt = $pdo->query(
-        "SELECT setting_key, setting_value FROM platform_settings
-         WHERE setting_key IN ('watermark_type', 'watermark_logo_url', 'watermark_website_url', 'watermark_plans')"
-    );
-    $wmSettings = [];
-    while ($row = $wmStmt->fetch()) {
-        $wmSettings[$row['setting_key']] = $row['setting_value'] ?? '';
-    }
-    $watermarkPlans = array_filter(explode(',', $wmSettings['watermark_plans'] ?? ''));
-    if (in_array($planCode, $watermarkPlans, true)) {
-        $invoice['watermark'] = [
-            'type' => $wmSettings['watermark_type'] ?? 'both',
-            'logo_url' => trim($wmSettings['watermark_logo_url'] ?? '') ?: null,
-            'website_url' => trim($wmSettings['watermark_website_url'] ?? 'https://ogatailor.app') ?: 'https://ogatailor.app',
-        ];
-    }
-
-    Response::json(['data' => $invoice]);
     return;
 }
 
