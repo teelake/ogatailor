@@ -1299,7 +1299,62 @@ if ($method === 'POST' && routeMatches($path, '/api/plans/upgrade-initialize')) 
     return;
 }
 
-if ($method === 'POST' && routeMatches($path, '/api/customers')) {
+// Archive - must come BEFORE POST /api/customers (routeMatches is too broad)
+if ($method === 'POST' && $path === '/api/customers/archive') {
+    $data = requestBody();
+    $customerId = trim((string)($data['customer_id'] ?? ''));
+    $ownerId = (string)($authUser['id'] ?? '');
+    $archived = (bool)($data['archived'] ?? true);
+
+    if ($customerId === '') {
+        Response::json(['error' => 'customer_id is required'], 422);
+        return;
+    }
+
+    if ($archived) {
+        $stmt = $pdo->prepare(
+            'UPDATE customers
+             SET notes = CASE
+                    WHEN notes IS NULL OR notes = \'\' THEN \'[ARCHIVED]\'
+                    WHEN notes LIKE \'[ARCHIVED]%\' THEN notes
+                    ELSE CONCAT(\'[ARCHIVED] \', notes)
+                 END,
+                 updated_at = NOW(),
+                 last_modified_at = NOW()
+             WHERE id = :id AND owner_user_id = :owner_user_id'
+        );
+    } else {
+        $stmt = $pdo->prepare(
+            'UPDATE customers
+             SET notes = TRIM(
+                   CASE
+                     WHEN COALESCE(notes, \'\') LIKE \'[ARCHIVED] %\' THEN SUBSTRING(notes, 12)
+                     WHEN COALESCE(notes, \'\') = \'[ARCHIVED]\' THEN \'\'
+                     WHEN COALESCE(notes, \'\') LIKE \'[ARCHIVED]%\' THEN SUBSTRING(notes, 11)
+                     ELSE COALESCE(notes, \'\')
+                   END
+                 ),
+                 updated_at = NOW(),
+                 last_modified_at = NOW()
+             WHERE id = :id AND owner_user_id = :owner_user_id'
+        );
+    }
+
+    $stmt->execute([
+        ':id' => $customerId,
+        ':owner_user_id' => $ownerId,
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        Response::json(['error' => 'customer not found'], 404);
+        return;
+    }
+
+    Response::json(['message' => $archived ? 'Customer archived' : 'Customer unarchived']);
+    return;
+}
+
+if ($method === 'POST' && $path === '/api/customers') {
     $data = requestBody();
     $customerId = Uuid::v4();
     $ownerId = (string)($authUser['id'] ?? '');
@@ -1538,61 +1593,6 @@ if ($method === 'PATCH' && routeMatches($path, '/api/customers')) {
     }
 
     Response::json(['message' => 'Customer updated']);
-    return;
-}
-
-if ($method === 'POST' && routeMatches($path, '/api/customers/archive')) {
-    $data = requestBody();
-    $customerId = trim((string)($data['customer_id'] ?? ''));
-    $ownerId = (string)($authUser['id'] ?? '');
-    $archived = (bool)($data['archived'] ?? true);
-
-    if ($customerId === '') {
-        Response::json(['error' => 'customer_id is required'], 422);
-        return;
-    }
-
-    if ($archived) {
-        $stmt = $pdo->prepare(
-            'UPDATE customers
-             SET notes = CASE
-                    WHEN notes IS NULL OR notes = \'\' THEN \'[ARCHIVED]\'
-                    WHEN notes LIKE \'[ARCHIVED]%\' THEN notes
-                    ELSE CONCAT(\'[ARCHIVED] \', notes)
-                 END,
-                 updated_at = NOW(),
-                 last_modified_at = NOW()
-             WHERE id = :id AND owner_user_id = :owner_user_id'
-        );
-    } else {
-        // Remove only the leading [ARCHIVED] or [ARCHIVED]  prefix (preserves [ARCHIVED] if in middle of notes)
-        $stmt = $pdo->prepare(
-            'UPDATE customers
-             SET notes = TRIM(
-                   CASE
-                     WHEN COALESCE(notes, \'\') LIKE \'[ARCHIVED] %\' THEN SUBSTRING(notes, 12)
-                     WHEN COALESCE(notes, \'\') = \'[ARCHIVED]\' THEN \'\'
-                     WHEN COALESCE(notes, \'\') LIKE \'[ARCHIVED]%\' THEN SUBSTRING(notes, 11)
-                     ELSE COALESCE(notes, \'\')
-                   END
-                 ),
-                 updated_at = NOW(),
-                 last_modified_at = NOW()
-             WHERE id = :id AND owner_user_id = :owner_user_id'
-        );
-    }
-
-    $stmt->execute([
-        ':id' => $customerId,
-        ':owner_user_id' => $ownerId,
-    ]);
-
-    if ($stmt->rowCount() < 1) {
-        Response::json(['error' => 'customer not found'], 404);
-        return;
-    }
-
-    Response::json(['message' => $archived ? 'Customer archived' : 'Customer unarchived']);
     return;
 }
 
