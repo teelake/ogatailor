@@ -47,7 +47,7 @@ class InvoicePreviewWidget extends StatelessWidget {
     final dueAt = _formatDate(invoice['due_at']?.toString());
     final currency = (invoice['currency'] ?? 'NGN').toString();
     final symbol = currencySymbols?[currency.toUpperCase()] ?? _currencySymbol(currency);
-    final totalAmount = (invoice['total_amount'] ?? 0) as num;
+    final totalAmount = parseAmount(invoice['total_amount']);
     final items = (invoice['items'] as List<dynamic>?) ?? [];
     final logoBase64 = (invoice['logo_data'] as String?)?.trim();
     final watermark = invoice['watermark'] as Map<String, dynamic>?;
@@ -121,14 +121,15 @@ class InvoicePreviewWidget extends StatelessWidget {
               ),
               ...items.map<TableRow>((item) {
                 final desc = (item['description'] ?? '').toString();
-                final price = (item['unit_price'] ?? 0) as num;
-                final qty = (item['quantity'] ?? 1) as num;
-                final amount = (item['amount'] ?? 0) as num;
+                final price = parseAmount(item['unit_price']);
+                final qty = parseAmount(item['quantity']);
+                final qtyDisplay = qty > 0 ? qty : 1;
+                final amount = parseAmount(item['amount']);
                 return TableRow(
                   children: [
                     Padding(padding: const EdgeInsets.all(8), child: Text(desc, style: const TextStyle(fontSize: 10))),
                     Padding(padding: const EdgeInsets.all(8), child: Text('$symbol${formatAmount(price)}', style: const TextStyle(fontSize: 10))),
-                    Padding(padding: const EdgeInsets.all(8), child: Text(qty.toStringAsFixed(0), style: const TextStyle(fontSize: 10))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text(qtyDisplay.toStringAsFixed(0), style: const TextStyle(fontSize: 10))),
                     Padding(padding: const EdgeInsets.all(8), child: Text('$symbol${formatAmount(amount)}', style: const TextStyle(fontSize: 10))),
                   ],
                 );

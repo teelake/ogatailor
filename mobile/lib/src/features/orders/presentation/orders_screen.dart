@@ -1130,7 +1130,7 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
                           border: Border.all(color: Colors.grey.shade300),
                         ),
                         child: Text(
-                          'Invoice #${invoice['invoice_number'] ?? '—'}\nTotal: ${invoice['currency'] ?? 'NGN'} ${formatAmount((invoice['total_amount'] ?? 0) as num)}',
+                          'Invoice #${invoice['invoice_number'] ?? '—'}\nTotal: ${invoice['currency'] ?? 'NGN'} ${formatAmount(parseAmount(invoice['total_amount']))}',
                           style: const TextStyle(fontSize: 14),
                         ),
                       ),

@@ -40,7 +40,7 @@ Future<Uint8List> buildInvoicePdf(
   final dueAt = _formatDate(invoice['due_at']?.toString());
   final currency = (invoice['currency'] ?? 'NGN').toString();
   final symbol = currencySymbols?[currency.toUpperCase()] ?? _currencySymbol(currency);
-  final totalAmount = (invoice['total_amount'] ?? 0) as num;
+  final totalAmount = parseAmount(invoice['total_amount']);
   final items = (invoice['items'] as List<dynamic>?) ?? [];
   final logoBase64 = (invoice['logo_data'] as String?)?.trim();
   pw.ImageProvider? logoImage;
@@ -161,14 +161,15 @@ Future<Uint8List> buildInvoicePdf(
                 ),
                 ...items.map<pw.TableRow>((item) {
                   final desc = (item['description'] ?? '').toString();
-                  final price = (item['unit_price'] ?? 0) as num;
-                  final qty = (item['quantity'] ?? 1) as num;
-                  final amount = (item['amount'] ?? 0) as num;
+                  final price = parseAmount(item['unit_price']);
+                  final qty = parseAmount(item['quantity']);
+                  final qtyDisplay = qty > 0 ? qty : 1;
+                  final amount = parseAmount(item['amount']);
                   return pw.TableRow(
                     children: [
                       pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(desc, style: const pw.TextStyle(fontSize: 10))),
                       pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('$symbol${formatAmount(price)}', style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(qty.toStringAsFixed(0), style: const pw.TextStyle(fontSize: 10))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(qtyDisplay.toStringAsFixed(0), style: const pw.TextStyle(fontSize: 10))),
                       pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('$symbol${formatAmount(amount)}', style: const pw.TextStyle(fontSize: 10))),
                     ],
                   );

@@ -692,6 +692,16 @@ if ($method === 'GET' && $path === '/api/invoices/by-order') {
             'website_url' => trim($wmSettings['watermark_website_url'] ?? 'https://ogatailor.app') ?: 'https://ogatailor.app',
         ];
     }
+    // Ensure numeric fields are numbers for JSON (PDO returns DECIMAL as string)
+    $invoice['total_amount'] = (float)($invoice['total_amount'] ?? 0);
+    $invoice['subtotal_amount'] = (float)($invoice['subtotal_amount'] ?? 0);
+    $invoice['discount_amount'] = (float)($invoice['discount_amount'] ?? 0);
+    foreach ($invoice['items'] as &$it) {
+        $it['unit_price'] = (float)($it['unit_price'] ?? 0);
+        $it['amount'] = (float)($it['amount'] ?? 0);
+        $it['quantity'] = (float)($it['quantity'] ?? 1);
+    }
+    unset($it);
     $logByOrder("invoice_by_order success invoice_id=" . ($invoice['id'] ?? '') . " items=" . count($invoice['items'] ?? []));
     Response::json(['data' => $invoice]);
     return;
