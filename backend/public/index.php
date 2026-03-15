@@ -577,7 +577,25 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
     $dueAt = $order['due_date'] ?? null;
 
     $invoiceId = Uuid::v4();
-    $itemId = Uuid::v4();
+
+    $orderItems = [];
+    try {
+        $oiStmt = $pdo->prepare(
+            'SELECT description, quantity, unit_price, amount FROM order_items WHERE order_id = :order_id ORDER BY sort_order, created_at'
+        );
+        $oiStmt->execute([':order_id' => $orderId]);
+        $orderItems = $oiStmt->fetchAll(\PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        // order_items table may not exist
+    }
+    if (empty($orderItems)) {
+        $orderItems = [[
+            'description' => (string)$order['title'],
+            'quantity' => 1,
+            'unit_price' => $subtotal,
+            'amount' => $subtotal,
+        ]];
+    }
 
     try {
         $pdo->beginTransaction();
@@ -599,15 +617,18 @@ if ($method === 'POST' && $path === '/api/invoices/generate') {
 
         $itemStmt = $pdo->prepare(
             'INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount, created_at)
-             VALUES (:id, :invoice_id, :description, 1, :unit_price, :amount, NOW())'
+             VALUES (:id, :invoice_id, :description, :quantity, :unit_price, :amount, NOW())'
         );
-        $itemStmt->execute([
-            ':id' => $itemId,
-            ':invoice_id' => $invoiceId,
-            ':description' => (string)$order['title'],
-            ':unit_price' => $subtotal,
-            ':amount' => $subtotal,
-        ]);
+        foreach ($orderItems as $oi) {
+            $itemStmt->execute([
+                ':id' => Uuid::v4(),
+                ':invoice_id' => $invoiceId,
+                ':description' => (string)$oi['description'],
+                ':quantity' => (float)$oi['quantity'],
+                ':unit_price' => (float)$oi['unit_price'],
+                ':amount' => (float)$oi['amount'],
+            ]);
+        }
 
         $pdo->commit();
     } catch (\Throwable $e) {
@@ -1804,14 +1825,60 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
     $allowPastDueDate = filter_var(($data['allow_past_due_date'] ?? false), FILTER_VALIDATE_BOOLEAN);
     $amountTotal = (float)($data['amount_total'] ?? 0);
     $notes = trim((string)($data['notes'] ?? ''));
+    $items = $data['items'] ?? null;
 
-    if ($customerId === '' || $title === '') {
-        Response::json(['error' => 'customer_id and title are required'], 422);
+    if ($customerId === '') {
+        Response::json(['error' => 'customer_id is required'], 422);
         return;
     }
-    if ($amountTotal < 0) {
-        Response::json(['error' => 'amount_total cannot be negative'], 422);
-        return;
+
+    $orderTitle = $title;
+    $computedTotal = 0.0;
+    $itemsToInsert = [];
+
+    if (is_array($items) && !empty($items)) {
+        foreach ($items as $idx => $it) {
+            $desc = trim((string)($it['description'] ?? ''));
+            $qty = (float)($it['quantity'] ?? 1);
+            $price = (float)($it['unit_price'] ?? 0);
+            if ($desc === '' || $qty <= 0 || $price < 0) {
+                continue;
+            }
+            $amt = $qty * $price;
+            $computedTotal += $amt;
+            $itemsToInsert[] = [
+                'description' => $desc,
+                'quantity' => $qty,
+                'unit_price' => $price,
+                'amount' => $amt,
+                'sort_order' => $idx,
+            ];
+        }
+        if (empty($itemsToInsert)) {
+            Response::json(['error' => 'At least one valid item (description, quantity, unit_price) is required'], 422);
+            return;
+        }
+        $orderTitle = $itemsToInsert[0]['description'];
+        if (count($itemsToInsert) > 1) {
+            $orderTitle .= ' +' . (count($itemsToInsert) - 1) . ' more';
+        }
+        $amountTotal = $computedTotal;
+    } else {
+        if ($title === '') {
+            Response::json(['error' => 'title is required when no items provided'], 422);
+            return;
+        }
+        if ($amountTotal < 0) {
+            Response::json(['error' => 'amount_total cannot be negative'], 422);
+            return;
+        }
+        $itemsToInsert[] = [
+            'description' => $title,
+            'quantity' => 1,
+            'unit_price' => $amountTotal,
+            'amount' => $amountTotal,
+            'sort_order' => 0,
+        ];
     }
 
     $ownerCheck = $pdo->prepare(
@@ -1852,12 +1919,38 @@ if ($method === 'POST' && routeMatches($path, '/api/orders')) {
         ':id' => $orderId,
         ':owner_user_id' => $ownerId,
         ':customer_id' => $customerId,
-        ':title' => $title,
+        ':title' => $orderTitle,
         ':status' => $status,
         ':due_date' => $dueDate !== '' ? $dueDate : null,
         ':amount_total' => $amountTotal,
         ':notes' => $notes !== '' ? $notes : null,
     ]);
+
+    $orderItemsTable = 'order_items';
+    $hasOrderItems = false;
+    try {
+        $pdo->query("SELECT 1 FROM {$orderItemsTable} LIMIT 1");
+        $hasOrderItems = true;
+    } catch (\Throwable $e) {
+        // table may not exist
+    }
+    if ($hasOrderItems) {
+        $itemStmt = $pdo->prepare(
+            'INSERT INTO order_items (id, order_id, description, quantity, unit_price, amount, sort_order, created_at)
+             VALUES (:id, :order_id, :description, :quantity, :unit_price, :amount, :sort_order, NOW())'
+        );
+        foreach ($itemsToInsert as $idx => $it) {
+            $itemStmt->execute([
+                ':id' => Uuid::v4(),
+                ':order_id' => $orderId,
+                ':description' => $it['description'],
+                ':quantity' => $it['quantity'],
+                ':unit_price' => $it['unit_price'],
+                ':amount' => $it['amount'],
+                ':sort_order' => $it['sort_order'],
+            ]);
+        }
+    }
 
     Response::json(['id' => $orderId], 201);
     return;

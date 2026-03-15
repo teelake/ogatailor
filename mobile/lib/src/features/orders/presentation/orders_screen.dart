@@ -369,6 +369,12 @@ class _CreateOrderSheet extends ConsumerStatefulWidget {
   ConsumerState<_CreateOrderSheet> createState() => _CreateOrderSheetState();
 }
 
+class _OrderItem {
+  final TextEditingController descController = TextEditingController();
+  final TextEditingController qtyController = TextEditingController(text: '1');
+  final TextEditingController priceController = TextEditingController();
+}
+
 class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
   static const _pageSize = 30;
   final _formKey = GlobalKey<FormState>();
@@ -380,11 +386,13 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
   DateTime? _selectedDueDate;
   bool _allowPastDueDate = false;
   bool _saving = false;
+  final List<_OrderItem> _items = [];
+  bool _useMultipleItems = false;
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(_prefillMostRecentCustomer);
+    _items.add(_OrderItem());
   }
 
   @override
@@ -392,6 +400,11 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
     _titleController.dispose();
     _amountController.dispose();
     _notesController.dispose();
+    for (final item in _items) {
+      item.descController.dispose();
+      item.qtyController.dispose();
+      item.priceController.dispose();
+    }
     super.dispose();
   }
 
@@ -427,24 +440,117 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                 ),
               ),
             const SizedBox(height: 10),
-            TextFormField(
-              controller: _titleController,
-              decoration: const InputDecoration(labelText: 'Order title'),
-              validator: (value) =>
-                  value == null || value.trim().isEmpty ? 'Order title is required' : null,
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Multiple items'),
+              subtitle: const Text('Add more than one item to this order'),
+              value: _useMultipleItems,
+              onChanged: _saving ? null : (v) => setState(() => _useMultipleItems = v ?? false),
             ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _amountController,
-              decoration: const InputDecoration(labelText: 'Amount (NGN)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              validator: (value) {
-                final n = double.tryParse((value ?? '').trim());
-                if (n == null) return 'Enter a valid amount';
-                if (n < 0) return 'Amount cannot be negative';
-                return null;
-              },
-            ),
+            if (_useMultipleItems) ...[
+              const SizedBox(height: 8),
+              ..._items.asMap().entries.map((e) {
+                final i = e.key;
+                final item = e.value;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_items.length > 1)
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: IconButton(
+                              icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                              onPressed: _saving || _items.length <= 1
+                                  ? null
+                                  : () => setState(() {
+                                        item.descController.dispose();
+                                        item.qtyController.dispose();
+                                        item.priceController.dispose();
+                                        _items.removeAt(i);
+                                      }),
+                            ),
+                          ),
+                        TextFormField(
+                          controller: item.descController,
+                          decoration: const InputDecoration(labelText: 'Item description'),
+                          validator: _useMultipleItems
+                              ? (v) => (v ?? '').trim().isEmpty ? 'Required' : null
+                              : null,
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: TextFormField(
+                                controller: item.qtyController,
+                                decoration: const InputDecoration(labelText: 'Qty'),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                validator: _useMultipleItems
+                                    ? (v) {
+                                        final n = double.tryParse((v ?? '').trim());
+                                        return n == null || n <= 0 ? 'Invalid' : null;
+                                      }
+                                    : null,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 3,
+                              child: TextFormField(
+                                controller: item.priceController,
+                                decoration: const InputDecoration(labelText: 'Unit price (₦)'),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                validator: _useMultipleItems
+                                    ? (v) {
+                                        final n = double.tryParse((v ?? '').trim());
+                                        return n == null || n < 0 ? 'Invalid' : null;
+                                      }
+                                    : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              TextButton.icon(
+                onPressed: _saving
+                    ? null
+                    : () => setState(() => _items.add(_OrderItem())),
+                icon: const Icon(Icons.add),
+                label: const Text('Add item'),
+              ),
+              const SizedBox(height: 10),
+            ] else ...[
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(labelText: 'Order title'),
+                validator: (value) => !_useMultipleItems && (value == null || value.trim().isEmpty)
+                    ? 'Order title is required' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _amountController,
+                decoration: const InputDecoration(labelText: 'Amount (NGN)'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                validator: (value) {
+                  if (_useMultipleItems) return null;
+                  final n = double.tryParse((value ?? '').trim());
+                  if (n == null) return 'Enter a valid amount';
+                  if (n < 0) return 'Amount cannot be negative';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
             const SizedBox(height: 10),
             TextFormField(
               controller: _notesController,
@@ -506,18 +612,54 @@ class _CreateOrderSheetState extends ConsumerState<_CreateOrderSheet> {
                         );
                         return;
                       }
+                      String title;
+                      double amountTotal;
+                      List<Map<String, dynamic>>? items;
+                      if (_useMultipleItems) {
+                        final validItems = <Map<String, dynamic>>[];
+                        for (final item in _items) {
+                          final desc = item.descController.text.trim();
+                          final qty = double.tryParse(item.qtyController.text.trim()) ?? 1;
+                          final price = double.tryParse(item.priceController.text.trim()) ?? 0;
+                          if (desc.isEmpty || qty <= 0 || price < 0) continue;
+                          validItems.add({
+                            'description': desc,
+                            'quantity': qty,
+                            'unit_price': price,
+                          });
+                        }
+                        if (validItems.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Add at least one valid item.')),
+                          );
+                          return;
+                        }
+                        title = validItems.first['description'] as String;
+                        if (validItems.length > 1) {
+                          title += ' +${validItems.length - 1} more';
+                        }
+                        amountTotal = validItems.fold<double>(
+                          0,
+                          (sum, e) => sum + ((e['quantity'] as num) * (e['unit_price'] as num)),
+                        );
+                        items = validItems;
+                      } else {
+                        title = _titleController.text.trim();
+                        amountTotal = double.parse(_amountController.text.trim());
+                      }
                       setState(() => _saving = true);
                       try {
                         final queuedOffline = await ref.read(ordersRepositoryProvider).createOrder(
                               customerId: _selectedCustomerId!,
-                              title: _titleController.text.trim(),
+                              title: title,
                               status: 'pending',
-                              amountTotal: double.parse(_amountController.text.trim()),
+                              amountTotal: amountTotal,
                               notes: _notesController.text.trim().isEmpty
                                   ? null
                                   : _notesController.text.trim(),
                               dueDate: _selectedDueDate,
                               allowPastDueDate: _allowPastDueDate,
+                              items: items,
                             );
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -1120,18 +1262,28 @@ class _InvoiceShareSheetState extends State<_InvoiceShareSheet> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 120),
                 child: hasItems
-                    ? InvoicePreviewWidget(invoice: invoice, width: MediaQuery.of(context).size.width - 48, currencySymbols: widget.currencySymbols)
+                    ? InvoicePreviewWidget(
+                        invoice: invoice,
+                        width: (MediaQuery.of(context).size.width - 48).clamp(280.0, kInvoiceDocumentWidth),
+                        currencySymbols: widget.currencySymbols,
+                      )
                     : Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(24),
+                        width: (MediaQuery.of(context).size.width - 48).clamp(280.0, kInvoiceDocumentWidth),
+                        padding: const EdgeInsets.all(32),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(4),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
                         child: Text(
                           'Invoice #${invoice['invoice_number'] ?? '—'}\nTotal: ${invoice['currency'] ?? 'NGN'} ${formatAmount(parseAmount(invoice['total_amount']))}',
-                          style: const TextStyle(fontSize: 14),
+                          style: const TextStyle(fontSize: 14, color: Colors.black87),
                         ),
                       ),
               ),

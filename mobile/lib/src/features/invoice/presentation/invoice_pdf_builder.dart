@@ -14,6 +14,16 @@ String _formatDate(String? iso) {
   return d != null ? DateFormat('dd MMM yyyy').format(d.toLocal()) : iso;
 }
 
+String _formatInvoiceStatus(String status) {
+  return switch (status.toLowerCase()) {
+    'paid' => 'Paid',
+    'partially_paid' => 'Partially paid',
+    'overdue' => 'Overdue',
+    'draft' => 'Draft',
+    _ => 'Unpaid',
+  };
+}
+
 String _currencySymbol(String currency) {
   return switch (currency.toUpperCase()) {
     'NGN' => '₦',
@@ -41,6 +51,11 @@ Future<Uint8List> buildInvoicePdf(
   final currency = (invoice['currency'] ?? 'NGN').toString();
   final symbol = currencySymbols?[currency.toUpperCase()] ?? _currencySymbol(currency);
   final totalAmount = parseAmount(invoice['total_amount']);
+  final subtotalAmount = parseAmount(invoice['subtotal_amount']);
+  final vatEnabled = (invoice['vat_enabled'] ?? false) == true;
+  final vatRate = (invoice['default_vat_rate'] as num?)?.toDouble() ?? 0;
+  final vatAmount = vatEnabled ? totalAmount - subtotalAmount : 0.0;
+  final status = (invoice['status'] ?? 'issued').toString();
   final items = (invoice['items'] as List<dynamic>?) ?? [];
   final logoBase64 = (invoice['logo_data'] as String?)?.trim();
   pw.ImageProvider? logoImage;
@@ -145,7 +160,7 @@ Future<Uint8List> buildInvoicePdf(
             pw.Text('BILL TO', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 4),
             pw.Text(customerName, style: const pw.TextStyle(fontSize: 12)),
-            if (customerPhone.isNotEmpty) pw.Text(customerPhone, style: const pw.TextStyle(fontSize: 10)),
+            if (customerPhone.isNotEmpty) pw.Text('Phone: $customerPhone', style: const pw.TextStyle(fontSize: 10)),
             pw.SizedBox(height: 24),
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300),
@@ -179,7 +194,21 @@ Future<Uint8List> buildInvoicePdf(
             pw.SizedBox(height: 16),
             pw.Align(
               alignment: pw.Alignment.centerRight,
-              child: pw.Text('Total: $symbol${formatAmount(totalAmount)}', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                mainAxisSize: pw.MainAxisSize.min,
+                children: [
+                  if (vatEnabled) ...[
+                    pw.Text('Subtotal: $symbol${formatAmount(subtotalAmount)} $currency', style: const pw.TextStyle(fontSize: 11)),
+                    pw.SizedBox(height: 4),
+                    pw.Text('VAT (${vatRate.toStringAsFixed(1)}%): $symbol${formatAmount(vatAmount)} $currency', style: const pw.TextStyle(fontSize: 11)),
+                    pw.SizedBox(height: 4),
+                  ],
+                  pw.Text('Total: $symbol${formatAmount(totalAmount)} $currency', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 4),
+                  pw.Text('Status: ${_formatInvoiceStatus(status)}', style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700)),
+                ],
+              ),
             ),
           ],
         );

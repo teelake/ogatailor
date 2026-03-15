@@ -10,6 +10,7 @@ import '../../../core/utils/error_message.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../plan/application/plan_controller.dart';
 import '../../plan/domain/plan_summary.dart';
+import '../../plan/presentation/upgrade_screen.dart';
 import '../application/customers_controller.dart';
 import '../domain/customer.dart';
 import 'add_customer_screen.dart';
@@ -61,7 +62,19 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
       appBar: AppBar(
         title: const Text('Customers'),
         actions: [
-          _PlanBadge(summaryAsync: planSummaryAsync),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const UpgradeScreen()),
+              ),
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: _PlanBadge(summaryAsync: planSummaryAsync),
+              ),
+            ),
+          ),
           const SizedBox(width: 6),
         ],
       ),

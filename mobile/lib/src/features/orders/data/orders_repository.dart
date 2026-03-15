@@ -55,8 +55,9 @@ class OrdersRepository {
     String? notes,
     DateTime? dueDate,
     bool allowPastDueDate = false,
+    List<Map<String, dynamic>>? items,
   }) async {
-    final body = {
+    final body = <String, dynamic>{
       'customer_id': customerId,
       'title': title,
       'status': status,
@@ -65,6 +66,13 @@ class OrdersRepository {
       'due_date': dueDate == null ? null : DateFormat('yyyy-MM-dd HH:mm:ss').format(dueDate),
       'allow_past_due_date': allowPastDueDate,
     };
+    if (items != null && items.isNotEmpty) {
+      body['items'] = items.map((e) => {
+        'description': e['description'],
+        'quantity': (e['quantity'] ?? 1) as num,
+        'unit_price': (e['unit_price'] ?? 0) as num,
+      }).toList();
+    }
     try {
       final response = await _dio.post('/api/orders', data: body);
       final data = Map<String, dynamic>.from(response.data as Map);
